@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Growth Archive - Island Growth</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&amp;family=Quicksand:wght@600;700&amp;family=Be+Vietnam+Pro:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary-fixed": "#211b00",
+                        "tertiary": "#6e5e00",
+                        "on-error-container": "#93000a",
+                        "primary-fixed": "#9bf980",
+                        "tertiary-fixed-dim": "#dec657",
+                        "surface": "#fcfaef",
+                        "error-container": "#ffdad6",
+                        "on-primary-container": "#0b5800",
+                        "tertiary-fixed": "#fbe270",
+                        "on-secondary-fixed-variant": "#004e60",
+                        "tertiary-container": "#d3bc4e",
+                        "outline": "#707a69",
+                        "inverse-primary": "#80dc67",
+                        "background": "#fcfaef",
+                        "on-error": "#ffffff",
+                        "on-secondary-fixed": "#001f28",
+                        "inverse-on-surface": "#f3f1e6",
+                        "outline-variant": "#bfcab6",
+                        "secondary-fixed": "#b5ebff",
+                        "on-primary-fixed": "#022100",
+                        "on-tertiary-container": "#584b00",
+                        "primary-container": "#76d15e",
+                        "secondary": "#00677e",
+                        "surface-tint": "#106e00",
+                        "secondary-fixed-dim": "#81d2ee",
+                        "on-surface-variant": "#404a3b",
+                        "on-tertiary-fixed-variant": "#534600",
+                        "surface-container-high": "#eae8de",
+                        "surface-dim": "#dcdad0",
+                        "surface-bright": "#fcfaef",
+                        "surface-container": "#f0eee3",
+                        "on-secondary-container": "#00667d",
+                        "on-secondary": "#ffffff",
+                        "secondary-container": "#92e3ff",
+                        "primary": "#106e00",
+                        "surface-container-low": "#f6f4e9",
+                        "on-primary": "#ffffff",
+                        "on-primary-fixed-variant": "#0a5300",
+                        "inverse-surface": "#30312a",
+                        "on-background": "#1b1c16",
+                        "surface-container-highest": "#e4e3d8",
+                        "error": "#ba1a1a",
+                        "surface-variant": "#e4e3d8",
+                        "on-surface": "#1b1c16",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary": "#ffffff",
+                        "primary-fixed-dim": "#80dc67"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "1rem",
+                        "lg": "2rem",
+                        "xl": "3rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "container-padding": "24px",
+                        "max-width": "1200px",
+                        "section-margin": "40px",
+                        "element-gap": "16px",
+                        "unit": "8px"
+                    },
+                    "fontFamily": {
+                        "headline-lg": ["Plus Jakarta Sans"],
+                        "label-bold": ["Quicksand"],
+                        "label-sm": ["Quicksand"],
+                        "display-lg": ["Plus Jakarta Sans"],
+                        "body-lg": ["Be Vietnam Pro"],
+                        "headline-lg-mobile": ["Plus Jakarta Sans"],
+                        "body-md": ["Be Vietnam Pro"]
+                    },
+                    "fontSize": {
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "700" }],
+                        "label-bold": ["14px", { "lineHeight": "20px", "fontWeight": "700" }],
+                        "label-sm": ["12px", { "lineHeight": "16px", "fontWeight": "600" }],
+                        "display-lg": ["40px", { "lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "800" }],
+                        "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "500" }],
+                        "headline-lg-mobile": ["24px", { "lineHeight": "32px", "fontWeight": "700" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100' height='100' fill='%23fcfaef'/%3E%3Crect width='100' height='100' filter='url(%23noise)' opacity='0.05'/%3E%3C/svg%3E");
+        }
+        .bouncy-btn {
+            border-bottom-width: 4px;
+            border-color: #0a5300;
+            transition: all 0.2s ease;
+        }
+        .bouncy-btn:active {
+            transform: translateY(4px) scale(0.98);
+            border-bottom-width: 0px;
+            margin-top: 4px;
+        }
+        .speech-bubble::after {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 20px;
+            border-width: 10px 10px 0;
+            border-style: solid;
+            border-color: #ffffff transparent transparent transparent;
+            display: block;
+            width: 0;
+        }
+        .sticker-chip {
+            box-shadow: 0 0 0 2px #ffffff, 0 4px 6px rgba(75,63,54,0.1);
+            transform: rotate(-2deg);
+        }
+        .sticker-chip:nth-child(even) {
+            transform: rotate(2deg);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen font-body-md text-body-md overflow-x-hidden selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<header class="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-container-padding h-20 bg-surface dark:bg-surface-dim shadow-[0_4px_0_0_rgba(75,63,54,0.1)]">
+<div class="font-headline-lg text-headline-lg font-bold text-primary dark:text-primary-fixed-dim flex items-center gap-2">
+            Island Growth
+        </div>
+<div class="flex items-center gap-4 hidden md:flex">
+<nav class="flex gap-6">
+<!-- Navigation is suppressed as this is a specific diagnostic view not in main nav, but showing icons per requirements -->
+</nav>
+</div>
+<div class="flex items-center gap-element-gap">
+<button class="p-2 text-on-surface-variant dark:text-outline-variant hover:scale-105 transition-transform duration-200">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">eco</span>
+</button>
+<button class="p-2 text-on-surface-variant dark:text-outline-variant hover:scale-105 transition-transform duration-200">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">wb_sunny</span>
+</button>
+<button class="p-2 text-on-surface-variant dark:text-outline-variant hover:scale-105 transition-transform duration-200">
+<span class="material-symbols-outlined" data-alt="Child's Profile Avatar" style="font-variation-settings: 'FILL' 1;">account_circle</span>
+</button>
+</div>
+</header>
+<!-- SideNavBar (Suppressed on mobile, visible on web per rules, though contextually might be hidden, following "Destination Rule" loosely for this dashboard view) -->
+<aside class="hidden md:flex fixed left-0 top-20 h-[calc(100vh-5rem)] flex-col p-4 z-40 bg-surface-container dark:bg-surface-container-high shadow-[4px_0_0_0_rgba(75,63,54,0.05)] w-64">
+<div class="mb-8 p-4">
+<div class="flex items-center gap-3 mb-2">
+<div class="w-12 h-12 rounded-full bg-primary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary-container" style="font-variation-settings: 'FILL' 1;">nature_people</span>
+</div>
+<div>
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-primary">Island Progress</h2>
+<p class="font-label-sm text-label-sm text-secondary">Sprouting High!</p>
+</div>
+</div>
+</div>
+<nav class="flex flex-col gap-2 flex-grow">
+<!-- Active state logic: Not directly matching any tab, so leaving Dashboard active as fallback for this complex view, or no active state. We'll set Dashboard active -->
+<a class="flex items-center gap-4 bg-primary-container dark:bg-primary text-on-primary-container dark:text-on-primary rounded-lg p-4 shadow-[0_4px_0_0_rgba(2,33,0,0.2)] hover:scale-[1.02] transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label-bold text-label-bold">Dashboard</span>
+</a>
+<a class="flex items-center gap-4 text-on-surface-variant dark:text-outline-variant p-4 hover:bg-surface-variant dark:hover:bg-surface-container-highest rounded-lg hover:scale-[1.02] transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">spa</span>
+<span class="font-label-bold text-label-bold">Habit Center</span>
+</a>
+<a class="flex items-center gap-4 text-on-surface-variant dark:text-outline-variant p-4 hover:bg-surface-variant dark:hover:bg-surface-container-highest rounded-lg hover:scale-[1.02] transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">menu_book</span>
+<span class="font-label-bold text-label-bold">Mistake Book</span>
+</a>
+<a class="flex items-center gap-4 text-on-surface-variant dark:text-outline-variant p-4 hover:bg-surface-variant dark:hover:bg-surface-container-highest rounded-lg hover:scale-[1.02] transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">query_stats</span>
+<span class="font-label-bold text-label-bold">Tracker</span>
+</a>
+<a class="flex items-center gap-4 text-on-surface-variant dark:text-outline-variant p-4 hover:bg-surface-variant dark:hover:bg-surface-container-highest rounded-lg hover:scale-[1.02] transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">military_tech</span>
+<span class="font-label-bold text-label-bold">Badge Room</span>
+</a>
+</nav>
+<div class="mt-auto">
+<button class="w-full text-center py-3 text-secondary font-label-bold text-label-bold hover:bg-surface-variant rounded-lg transition-colors">
+                Parental Controls
+            </button>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="pt-[104px] pb-32 md:pl-[288px] px-container-padding max-w-max-width mx-auto">
+<header class="mb-section-margin flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+<div>
+<h1 class="font-display-lg text-display-lg text-primary md:text-display-lg text-headline-lg-mobile mb-2">Growth Archive</h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant">Reviewing the journey to better habits, together.</p>
+</div>
+<button class="bouncy-btn bg-primary text-on-primary font-label-bold text-label-bold py-3 px-6 rounded-lg flex items-center gap-2 shadow-[0_4px_0_0_rgba(75,63,54,0.2)]">
+<span class="material-symbols-outlined">download</span>
+                Download PDF Comprehensive Development Report
+            </button>
+</header>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-element-gap">
+<!-- Left Column: Long-term trends -->
+<div class="lg:col-span-7 flex flex-col gap-element-gap">
+<div class="bg-surface-container-lowest rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)] relative overflow-hidden group">
+<!-- Decorative element -->
+<div class="absolute -right-10 -top-10 w-32 h-32 bg-secondary-fixed rounded-full opacity-20 blur-2xl group-hover:scale-110 transition-transform"></div>
+<h3 class="font-label-bold text-label-bold text-secondary mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined">trending_down</span>
+                        Missed Questions Trend
+                    </h3>
+<!-- Placeholder Chart Area -->
+<div class="h-48 w-full bg-surface-container rounded-lg flex items-end p-4 gap-2 relative">
+<!-- SVG Chart Mockup -->
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 100 40">
+<path d="M0,35 Q10,30 20,25 T40,15 T60,20 T80,10 T100,5" fill="none" stroke="#106e00" stroke-linecap="round" stroke-width="2"></path>
+<circle cx="20" cy="25" fill="#106e00" r="1.5"></circle>
+<circle cx="40" cy="15" fill="#106e00" r="1.5"></circle>
+<circle cx="60" cy="20" fill="#106e00" r="1.5"></circle>
+<circle cx="80" cy="10" fill="#106e00" r="1.5"></circle>
+<circle cx="100" cy="5" fill="#106e00" r="1.5"></circle>
+</svg>
+<div class="absolute top-4 right-4 bg-primary-container text-on-primary-container font-label-sm text-label-sm px-2 py-1 rounded sticker-chip">
+                             -15% this month!
+                         </div>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-element-gap">
+<!-- Item Loss Card -->
+<div class="bg-surface-container-lowest rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)]">
+<h3 class="font-label-bold text-label-bold text-secondary mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined">inventory_2</span>
+                            Item Loss Rate
+                        </h3>
+<div class="flex items-center justify-between mb-2">
+<span class="font-headline-lg text-headline-lg text-error">3</span>
+<span class="text-on-surface-variant font-label-sm text-label-sm">Items this week</span>
+</div>
+<div class="w-full bg-error-container h-2 rounded-full overflow-hidden">
+<div class="bg-error h-full rounded-full" style="width: 30%"></div>
+</div>
+</div>
+<!-- Completion Rate Card -->
+<div class="bg-surface-container-lowest rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)]">
+<h3 class="font-label-bold text-label-bold text-secondary mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined">task_alt</span>
+                            Completion Rate
+                        </h3>
+<div class="flex items-center justify-between mb-2">
+<span class="font-headline-lg text-headline-lg text-primary">92%</span>
+<span class="text-on-surface-variant font-label-sm text-label-sm">Awesome job!</span>
+</div>
+<div class="w-full bg-primary-fixed h-2 rounded-full overflow-hidden">
+<div class="bg-primary h-full rounded-full" style="width: 92%"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Spider Web Chart -->
+<div class="lg:col-span-5 bg-surface-container-lowest rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)] flex flex-col items-center justify-center relative">
+<h3 class="font-label-bold text-label-bold text-secondary w-full text-left mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined">radar</span>
+                    Peer Comparison Garden
+                </h3>
+<!-- Mock Spider Web / Radar Chart -->
+<div class="relative w-64 h-64 mt-4 mb-8">
+<svg class="w-full h-full transform -rotate-90" viewbox="0 0 100 100">
+<!-- Background webs -->
+<polygon fill="none" points="50,10 90,50 50,90 10,50" stroke="#bfcab6" stroke-width="0.5"></polygon>
+<polygon fill="none" points="50,20 80,50 50,80 20,50" stroke="#bfcab6" stroke-width="0.5"></polygon>
+<polygon fill="none" points="50,30 70,50 50,70 30,50" stroke="#bfcab6" stroke-width="0.5"></polygon>
+<!-- Axes -->
+<line stroke="#bfcab6" stroke-width="0.5" x1="50" x2="50" y1="50" y2="10"></line>
+<line stroke="#bfcab6" stroke-width="0.5" x1="50" x2="90" y1="50" y2="50"></line>
+<line stroke="#bfcab6" stroke-width="0.5" x1="50" x2="50" y1="50" y2="90"></line>
+<line stroke="#bfcab6" stroke-width="0.5" x1="50" x2="10" y1="50" y2="50"></line>
+<!-- Data Polygon -->
+<polygon class="transition-all duration-500 ease-in-out hover:fill-opacity-60 cursor-pointer" fill="rgba(118, 209, 94, 0.4)" points="50,20 75,50 50,60 30,50" stroke="#106e00" stroke-width="1.5"></polygon>
+<!-- Data Points -->
+<circle cx="50" cy="20" fill="#106e00" r="2"></circle>
+<circle cx="75" cy="50" fill="#106e00" r="2"></circle>
+<circle cx="50" cy="60" fill="#106e00" r="2"></circle>
+<circle cx="30" cy="50" fill="#106e00" r="2"></circle>
+</svg>
+<!-- Labels -->
+<div class="absolute -top-4 left-1/2 transform -translate-x-1/2 font-label-sm text-label-sm text-on-surface-variant">Focus</div>
+<div class="absolute top-1/2 -right-12 transform -translate-y-1/2 font-label-sm text-label-sm text-on-surface-variant">Neatness</div>
+<div class="absolute -bottom-6 left-1/2 transform -translate-x-1/2 font-label-sm text-label-sm text-on-surface-variant">Metacognition</div>
+<div class="absolute top-1/2 -left-8 transform -translate-y-1/2 font-label-sm text-label-sm text-on-surface-variant">Emotion</div>
+</div>
+<div class="bg-secondary-fixed/30 rounded-lg p-4 w-full mt-auto">
+<p class="font-body-md text-body-md text-on-secondary-fixed text-center">
+                        Growing steadily in <strong class="text-secondary">Focus</strong>. Let's water the <strong class="text-secondary">Metacognition</strong> sprout this week!
+                    </p>
+</div>
+</div>
+</div>
+<!-- Diagnostic Discovery Cards (Sticky Note Style for Parents) -->
+<section class="mt-section-margin">
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-primary mb-6 flex items-center gap-3">
+<span class="material-symbols-outlined text-tertiary text-3xl">lightbulb</span>
+                Diagnostic Discoveries
+            </h2>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<!-- Card 1 -->
+<div class="bg-secondary-fixed rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)] relative transform transition-transform hover:-translate-y-1">
+<!-- Pin icon -->
+<div class="absolute -top-3 left-1/2 transform -translate-x-1/2 w-6 h-6 rounded-full bg-error-container border-2 border-surface shadow-sm z-10"></div>
+<div class="flex items-start gap-4 mb-4 mt-2">
+<div class="bg-surface rounded-full p-2 flex-shrink-0">
+<span class="material-symbols-outlined text-secondary">visibility</span>
+</div>
+<div>
+<h4 class="font-label-bold text-label-bold text-on-secondary-fixed">Visual Fatigue Pattern</h4>
+<span class="text-xs text-secondary/80 font-label-sm">Observed 3 times this week</span>
+</div>
+</div>
+<div class="bg-surface/50 rounded-lg p-4 speech-bubble relative mb-2">
+<p class="font-body-md text-body-md text-on-secondary-fixed">
+                            "I noticed missed details increase after 20 minutes of continuous screen time. This suggests visual fatigue rather than a lack of understanding."
+                        </p>
+</div>
+<div class="mt-6 border-t border-surface/30 pt-4">
+<p class="font-label-bold text-label-bold text-secondary mb-2">Suggested Adjustment:</p>
+<p class="font-body-md text-body-md text-on-secondary-fixed">Try implementing a <strong class="bg-surface px-1 rounded">20-20-20 rule</strong> or adjusting the work-rest ratio to smaller chunks.</p>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="bg-tertiary-fixed rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)] relative transform transition-transform hover:-translate-y-1">
+<div class="absolute -top-3 left-1/2 transform -translate-x-1/2 w-6 h-6 rounded-full bg-primary-container border-2 border-surface shadow-sm z-10"></div>
+<div class="flex items-start gap-4 mb-4 mt-2">
+<div class="bg-surface rounded-full p-2 flex-shrink-0">
+<span class="material-symbols-outlined text-tertiary">psychology</span>
+</div>
+<div>
+<h4 class="font-label-bold text-label-bold text-on-tertiary-fixed">Task Initiation Spark</h4>
+<span class="text-xs text-tertiary/80 font-label-sm">Positive Trend</span>
+</div>
+</div>
+<div class="bg-surface/50 rounded-lg p-4 speech-bubble relative mb-2">
+<p class="font-body-md text-body-md text-on-tertiary-fixed">
+                            "Starting homework is much smoother when preceded by 5 minutes of physical 'wiggles' or a tactile sensory activity."
+                        </p>
+</div>
+<div class="mt-6 border-t border-surface/30 pt-4">
+<p class="font-label-bold text-label-bold text-tertiary mb-2">Suggested Adjustment:</p>
+<p class="font-body-md text-body-md text-on-tertiary-fixed">Keep the 'wiggles' routine! Consider adding a physical 'Start Button' prop.</p>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full py-8 px-container-padding flex flex-col md:flex-row justify-between items-center max-w-max-width mx-auto bg-surface-container-lowest dark:bg-surface-container-low border-t border-outline-variant flat no shadows mt-12 relative z-10">
+<div class="mb-4 md:mb-0 font-label-bold text-label-bold text-secondary">
+            © 2024 Island Growth Interventions
+        </div>
+<nav class="flex gap-6">
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-secondary font-label-sm text-label-sm hover:underline transition-all" href="#">Privacy Policy</a>
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-secondary font-label-sm text-label-sm hover:underline transition-all" href="#">Help Center</a>
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-secondary font-label-sm text-label-sm hover:underline transition-all" href="#">Parental Portal</a>
+</nav>
+</footer>
+</body></html>
