@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Parent/Child Dashboard - Island Growth</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&amp;family=Plus+Jakarta+Sans:wght@700;800&amp;family=Quicksand:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-tertiary-fixed": "#211b00",
+                        "tertiary": "#6e5e00",
+                        "on-error-container": "#93000a",
+                        "primary-fixed": "#9bf980",
+                        "tertiary-fixed-dim": "#dec657",
+                        "surface": "#fcfaef",
+                        "error-container": "#ffdad6",
+                        "on-primary-container": "#0b5800",
+                        "tertiary-fixed": "#fbe270",
+                        "on-secondary-fixed-variant": "#004e60",
+                        "tertiary-container": "#d3bc4e",
+                        "outline": "#707a69",
+                        "inverse-primary": "#80dc67",
+                        "background": "#fcfaef",
+                        "on-error": "#ffffff",
+                        "on-secondary-fixed": "#001f28",
+                        "inverse-on-surface": "#f3f1e6",
+                        "outline-variant": "#bfcab6",
+                        "secondary-fixed": "#b5ebff",
+                        "on-primary-fixed": "#022100",
+                        "on-tertiary-container": "#584b00",
+                        "primary-container": "#76d15e",
+                        "secondary": "#00677e",
+                        "surface-tint": "#106e00",
+                        "secondary-fixed-dim": "#81d2ee",
+                        "on-surface-variant": "#404a3b",
+                        "on-tertiary-fixed-variant": "#534600",
+                        "surface-container-high": "#eae8de",
+                        "surface-dim": "#dcdad0",
+                        "surface-bright": "#fcfaef",
+                        "surface-container": "#f0eee3",
+                        "on-secondary-container": "#00667d",
+                        "on-secondary": "#ffffff",
+                        "secondary-container": "#92e3ff",
+                        "primary": "#106e00",
+                        "surface-container-low": "#f6f4e9",
+                        "on-primary": "#ffffff",
+                        "on-primary-fixed-variant": "#0a5300",
+                        "inverse-surface": "#30312a",
+                        "on-background": "#1b1c16",
+                        "surface-container-highest": "#e4e3d8",
+                        "error": "#ba1a1a",
+                        "surface-variant": "#e4e3d8",
+                        "on-surface": "#1b1c16",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary": "#ffffff",
+                        "primary-fixed-dim": "#80dc67"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "1rem",
+                        "lg": "2rem",
+                        "xl": "3rem",
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "container-padding": "24px",
+                        "max-width": "1200px",
+                        "section-margin": "40px",
+                        "element-gap": "16px",
+                        "unit": "8px"
+                    },
+                    fontFamily: {
+                        "headline-lg": ["Plus Jakarta Sans"],
+                        "label-bold": ["Quicksand"],
+                        "label-sm": ["Quicksand"],
+                        "display-lg": ["Plus Jakarta Sans"],
+                        "body-lg": ["Be Vietnam Pro"],
+                        "headline-lg-mobile": ["Plus Jakarta Sans"],
+                        "body-md": ["Be Vietnam Pro"]
+                    },
+                    fontSize: {
+                        "headline-lg": ["32px", { lineHeight: "40px", fontWeight: "700" }],
+                        "label-bold": ["14px", { lineHeight: "20px", fontWeight: "700" }],
+                        "label-sm": ["12px", { lineHeight: "16px", fontWeight: "600" }],
+                        "display-lg": ["40px", { lineHeight: "48px", letterSpacing: "-0.02em", fontWeight: "800" }],
+                        "body-lg": ["18px", { lineHeight: "28px", fontWeight: "500" }],
+                        "headline-lg-mobile": ["24px", { lineHeight: "32px", fontWeight: "700" }],
+                        "body-md": ["16px", { lineHeight: "24px", fontWeight: "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: #fcfaef; /* surface-bright/background */
+            background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100' height='100' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+        }
+        
+        /* Bouncy Button Base */
+        .btn-bouncy {
+            transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-bouncy:active {
+            transform: scale(0.95) translateY(4px);
+            box-shadow: 0 0 0 0 rgba(0,0,0,0) !important;
+        }
+
+        /* Speech Bubble Tail */
+        .speech-bubble::after {
+            content: '';
+            position: absolute;
+            bottom: -15px;
+            left: 40px;
+            width: 0;
+            height: 0;
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-top: 20px solid #ffffff; /* Match surface-lowest */
+            transform: rotate(-10deg);
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="text-on-background font-body-md antialiased overflow-x-hidden">
+<!-- TopAppBar -->
+<header class="bg-surface shadow-[0_4px_0_0_rgba(75,63,54,0.1)] fixed top-0 left-0 w-full z-50 flex justify-between items-center px-container-padding h-20">
+<div class="font-headline-lg text-headline-lg font-bold text-primary flex items-center gap-2">
+<span aria-hidden="true" class="material-symbols-outlined" data-icon="forest" style="font-variation-settings: 'FILL' 1;">forest</span>
+            Island Growth
+        </div>
+<div class="flex items-center gap-element-gap">
+<button class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center text-primary hover:scale-105 transition-transform duration-200">
+<span class="material-symbols-outlined" data-icon="eco">eco</span>
+</button>
+<button class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center text-primary hover:scale-105 transition-transform duration-200">
+<span class="material-symbols-outlined" data-icon="wb_sunny">wb_sunny</span>
+</button>
+<button class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center text-primary hover:scale-105 transition-transform duration-200">
+<span class="material-symbols-outlined" data-icon="account_circle">account_circle</span>
+</button>
+</div>
+</header>
+<!-- SideNavBar & Main Content Wrapper -->
+<div class="flex pt-20 h-screen w-full">
+<!-- SideNavBar -->
+<nav class="hidden md:flex bg-surface-container shadow-[4px_0_0_0_rgba(75,63,54,0.05)] fixed left-0 top-20 h-[calc(100vh-5rem)] flex-col p-4 z-40 w-64">
+<div class="mb-8 px-4 flex flex-col gap-2">
+<div class="w-16 h-16 rounded-full bg-secondary-container overflow-hidden border-4 border-surface border-b-[6px] shadow-sm">
+<img alt="Growth Tree Status" class="w-full h-full object-cover" data-alt="A stylized, illustrative illustration of a healthy, vibrant green sapling growing out of rich brown soil, set against a bright, cheerful light blue sky background. The style is reminiscent of nurturing simulation games, featuring soft, rounded edges and a sense of magical growth. High key lighting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDCXw14JVr1rQPlQ-pHYkv-uLsHCQ7vqLRsk0DouEt86CSboNTBtCS8zXT6UId9q4Vr6al0HoHh4DBKez_uPvR31V-XOID229uJQ8Ilcak15LF1mnH1Nbm_pXH-VpDhs-KFVubVf8bcv0dKvLSqxnkI9Giaa_aHdve4zjVXCLlaY3L0QrkTIcSFiqqhf12x5rVZBarZ5k18AnSv6WEVxnDl4STLwbSked1ZGqsbY-LJ2AH2bI01jquV-0ni8pW1DEUtsc4L_lyv4ka7"/>
+</div>
+<div>
+<h2 class="font-label-bold text-label-bold text-on-surface">Island Progress</h2>
+<p class="font-body-md text-body-md text-on-surface-variant text-sm">Sprouting High!</p>
+</div>
+</div>
+<ul class="flex flex-col gap-2 flex-grow">
+<!-- Active Item: Dashboard -->
+<li>
+<a class="flex items-center gap-4 bg-primary-container text-on-primary-container rounded-lg p-4 shadow-[0_4px_0_0_rgba(2,33,0,0.2)] font-label-bold text-label-bold hover:scale-[1.02] transition-transform duration-200 translate-y-1" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+                        Dashboard
+                    </a>
+</li>
+<!-- Inactive Items -->
+<li>
+<a class="flex items-center gap-4 text-on-surface-variant p-4 hover:bg-surface-variant rounded-lg font-label-bold text-label-bold hover:scale-[1.02] transition-transform duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="spa">spa</span>
+                        Habit Center
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-4 text-on-surface-variant p-4 hover:bg-surface-variant rounded-lg font-label-bold text-label-bold hover:scale-[1.02] transition-transform duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="menu_book">menu_book</span>
+                        Mistake Book
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-4 text-on-surface-variant p-4 hover:bg-surface-variant rounded-lg font-label-bold text-label-bold hover:scale-[1.02] transition-transform duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="query_stats">query_stats</span>
+                        Tracker
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-4 text-on-surface-variant p-4 hover:bg-surface-variant rounded-lg font-label-bold text-label-bold hover:scale-[1.02] transition-transform duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="military_tech">military_tech</span>
+                        Badge Room
+                    </a>
+</li>
+</ul>
+<div class="mt-auto">
+<button class="w-full py-3 px-4 rounded-lg bg-secondary-container text-on-secondary-container font-label-bold text-label-bold flex items-center justify-center gap-2 hover:bg-secondary-fixed-dim transition-colors shadow-[0_4px_0_0_rgba(0,103,126,0.2)] btn-bouncy">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+                    Parental Controls
+                </button>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-1 md:ml-64 p-container-padding overflow-y-auto">
+<div class="max-w-max-width mx-auto flex flex-col gap-section-margin pb-20">
+<!-- Top Row: Status Summary -->
+<section class="grid grid-cols-1 md:grid-cols-3 gap-element-gap">
+<!-- Tree Status -->
+<div class="bg-surface-container-lowest rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)] flex items-center gap-4 transform rotate-1 hover:rotate-0 transition-transform">
+<div class="w-16 h-16 rounded-full bg-primary-container flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-4xl text-on-primary-container" data-icon="park">park</span>
+</div>
+<div class="flex-grow">
+<h3 class="font-label-bold text-label-bold text-on-surface mb-1">Growing Tree</h3>
+<div class="h-4 w-full bg-surface-variant rounded-full overflow-hidden border-2 border-outline-variant">
+<div class="h-full bg-primary w-2/3 rounded-full relative">
+<div class="absolute inset-0 bg-white opacity-20 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPgo8cmVjdCB3aWR0aD0iOCIgaGVpZ2h0PSI4IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMSIvPgo8L3N2Zz4=')]"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Sunlight Points -->
+<div class="bg-tertiary-container rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)] flex items-center justify-between transform -rotate-1 hover:rotate-0 transition-transform">
+<div>
+<h3 class="font-label-bold text-label-bold text-on-tertiary-container mb-1">Sunlight Points</h3>
+<div class="font-display-lg text-display-lg text-on-tertiary-container">120</div>
+</div>
+<div class="w-16 h-16 rounded-full bg-tertiary text-on-tertiary flex items-center justify-center shadow-inner">
+<span class="material-symbols-outlined text-4xl animate-spin-slow" data-icon="light_mode">light_mode</span>
+</div>
+</div>
+<!-- Badge Room Link -->
+<a class="bg-secondary-container rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)] flex items-center gap-4 group cursor-pointer hover:-translate-y-1 transition-transform" href="#">
+<div class="w-16 h-16 rounded-lg bg-secondary text-on-secondary flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-4xl" data-icon="workspace_premium">workspace_premium</span>
+</div>
+<div>
+<h3 class="font-label-bold text-label-bold text-on-secondary-container">Badge Room</h3>
+<p class="font-body-md text-body-md text-on-secondary-container opacity-80 text-sm">3 new to unlock!</p>
+</div>
+<span class="material-symbols-outlined text-on-secondary-container ml-auto group-hover:translate-x-2 transition-transform" data-icon="arrow_forward">arrow_forward</span>
+</a>
+</section>
+<!-- Main Focus: Today's Star Task -->
+<section class="relative">
+<div class="bg-surface-container-lowest rounded-xl p-8 md:p-12 shadow-[0_8px_0_0_rgba(75,63,54,0.15)] speech-bubble relative z-10 border-4 border-primary-container">
+<div class="absolute -top-4 -left-4 bg-tertiary text-on-tertiary font-label-bold px-4 py-1 rounded-full shadow-md transform -rotate-3 border-2 border-white">
+                            Today's Star Task! ⭐
+                        </div>
+<div class="flex flex-col md:flex-row items-center gap-8 text-center md:text-left">
+<div class="w-48 h-48 rounded-full bg-secondary-fixed overflow-hidden border-8 border-surface shadow-inner flex-shrink-0">
+<img alt="Finger-Point Reading" class="w-full h-full object-cover" data-alt="A close-up, child-friendly illustration of a small hand pointing at words in a colorful, open storybook. The scene is brightly lit with warm, inviting sunlight, creating a cozy and encouraging atmosphere. Soft pastel colors dominate the palette, emphasizing a nurturing educational environment." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCheYQO6Hki6KDYPJLQ0wb53iIz18cQURsmXeAWSmB5bUSVrru9vEIwk9O-sw7Gff4xvACkVB4VT1Nin48tsVQZZj5NxA0Q-daWsYe4L-QY3dteLHOF-h-FEXdgaxQLUN0JfG4PLqqSCypKeOcnHDajWlE7wTUBE1SsaeMTGK-u9uskmLv7WrgJiFwn4PXjUcydmQCzMV-CyT0zkRp_Z3-PxDV28hMlnMTguZnVaUuP9A_ShMDxhb9ivtnF4sm46jUw3SgWtHVtYZJy"/>
+</div>
+<div class="flex-grow">
+<h2 class="font-display-lg text-display-lg text-on-surface mb-4">Finger-Point Reading</h2>
+<p class="font-body-lg text-body-lg text-on-surface-variant mb-8">Read 1 page using your magic reading finger! Don't rush, enjoy the story.</p>
+<button class="btn-bouncy w-full md:w-auto px-12 py-6 bg-primary text-on-primary font-headline-lg text-headline-lg rounded-xl shadow-[0_8px_0_0_#0a5300] hover:bg-surface-tint flex items-center justify-center gap-3">
+<span class="material-symbols-outlined text-4xl" data-icon="check_circle">check_circle</span>
+                                    Done!
+                                </button>
+</div>
+</div>
+</div>
+</section>
+<!-- Secondary Tasks Grid -->
+<section class="grid grid-cols-1 md:grid-cols-2 gap-element-gap">
+<!-- Task: Organize Bag -->
+<div class="bg-surface-container-lowest rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)] flex items-start gap-4 border-2 border-transparent hover:border-outline-variant transition-colors group">
+<div class="w-12 h-12 rounded-lg bg-surface-variant flex items-center justify-center text-on-surface-variant group-hover:bg-primary-container group-hover:text-on-primary-container transition-colors">
+<span class="material-symbols-outlined text-3xl" data-icon="backpack">backpack</span>
+</div>
+<div class="flex-grow">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface mb-2">Organize Bag (3 Zones)</h3>
+<div class="flex gap-2">
+<span class="px-2 py-1 bg-surface-container-high rounded text-xs font-label-bold text-on-surface-variant">Books</span>
+<span class="px-2 py-1 bg-surface-container-high rounded text-xs font-label-bold text-on-surface-variant">Pencils</span>
+<span class="px-2 py-1 bg-surface-container-high rounded text-xs font-label-bold text-on-surface-variant">Snack</span>
+</div>
+</div>
+<button class="w-10 h-10 rounded-full border-2 border-outline flex items-center justify-center text-outline hover:bg-primary hover:border-primary hover:text-on-primary transition-colors btn-bouncy">
+<span class="material-symbols-outlined" data-icon="check">check</span>
+</button>
+</div>
+<!-- Task: Schulte Grid Game -->
+<div class="bg-surface-container-lowest rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.1)] flex items-start gap-4 border-2 border-transparent hover:border-outline-variant transition-colors group">
+<div class="w-12 h-12 rounded-lg bg-surface-variant flex items-center justify-center text-on-surface-variant group-hover:bg-tertiary-container group-hover:text-on-tertiary-container transition-colors">
+<span class="material-symbols-outlined text-3xl" data-icon="grid_4x4">grid_4x4</span>
+</div>
+<div class="flex-grow">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface mb-2">Schulte Grid Game</h3>
+<p class="font-body-md text-body-md text-on-surface-variant text-sm">Find numbers 1 to 10 as fast as you can!</p>
+</div>
+<button class="px-4 py-2 bg-tertiary text-on-tertiary font-label-bold rounded-lg shadow-[0_4px_0_0_#534600] hover:bg-tertiary-fixed-dim btn-bouncy">
+                            Play
+                        </button>
+</div>
+</section>
+<!-- Bottom Actions -->
+<section class="flex flex-col md:flex-row justify-between items-center gap-6 mt-8 pt-8 border-t border-outline-variant border-dashed">
+<button class="flex items-center gap-2 text-secondary font-label-bold hover:underline">
+<span class="material-symbols-outlined" data-icon="print">print</span>
+                        Print PDF Checklist
+                    </button>
+<!-- Sticky Note Style Parent Login -->
+<div class="bg-secondary-fixed-dim p-4 rounded-sm shadow-md transform rotate-2 max-w-xs w-full relative">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-error shadow-inner border border-white z-10 flex items-center justify-center">
+<div class="w-2 h-2 rounded-full bg-white opacity-50"></div>
+</div>
+<h4 class="font-label-bold text-on-secondary-fixed mb-2 text-center mt-2">Parent Portal</h4>
+<button class="w-full py-2 bg-secondary text-on-secondary rounded font-label-bold hover:bg-on-secondary-container transition-colors">
+                            Adult Login
+                        </button>
+</div>
+</section>
+</div>
+<!-- Footer (from JSON) -->
+<footer class="bg-surface-container-lowest border-t border-outline-variant w-full py-8 px-container-padding flex flex-col md:flex-row justify-between items-center max-w-max-width mx-auto mt-12 rounded-t-xl">
+<div class="font-label-bold text-label-bold text-secondary mb-4 md:mb-0">
+                    © 2024 Island Growth Interventions
+                </div>
+<div class="flex gap-6">
+<a class="text-on-surface-variant hover:text-secondary font-label-sm text-label-sm hover:underline transition-all" href="#">Privacy Policy</a>
+<a class="text-on-surface-variant hover:text-secondary font-label-sm text-label-sm hover:underline transition-all" href="#">Help Center</a>
+<a class="text-on-surface-variant hover:text-secondary font-label-sm text-label-sm hover:underline transition-all" href="#">Parental Portal</a>
+</div>
+</footer>
+</main>
+</div>
+</body></html>

@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Evidence-Based Lab - Island Care Portal</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;700&amp;family=Plus+Jakarta+Sans:wght@700;800&amp;family=Quicksand:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Config injected from instructions -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-tertiary-fixed-variant": "#534600",
+                    "inverse-surface": "#30312a",
+                    "primary-container": "#76d15e",
+                    "error-container": "#ffdad6",
+                    "secondary-container": "#92e3ff",
+                    "primary-fixed-dim": "#80dc67",
+                    "outline": "#707a69",
+                    "on-primary-fixed": "#022100",
+                    "on-error": "#ffffff",
+                    "on-secondary-fixed-variant": "#004e60",
+                    "on-secondary": "#ffffff",
+                    "surface-container-low": "#f6f4e9",
+                    "tertiary-fixed": "#fbe270",
+                    "tertiary": "#6e5e00",
+                    "on-secondary-container": "#00667d",
+                    "background": "#fcfaef",
+                    "secondary-fixed": "#b5ebff",
+                    "on-tertiary-fixed": "#211b00",
+                    "surface-container-lowest": "#ffffff",
+                    "on-error-container": "#93000a",
+                    "primary": "#106e00",
+                    "surface-variant": "#e4e3d8",
+                    "surface-container-highest": "#e4e3d8",
+                    "on-surface": "#1b1c16",
+                    "on-tertiary": "#ffffff",
+                    "surface-container-high": "#eae8de",
+                    "error": "#ba1a1a",
+                    "tertiary-container": "#d3bc4e",
+                    "inverse-primary": "#80dc67",
+                    "inverse-on-surface": "#f3f1e6",
+                    "on-background": "#1b1c16",
+                    "on-primary": "#ffffff",
+                    "outline-variant": "#bfcab6",
+                    "surface-tint": "#106e00",
+                    "tertiary-fixed-dim": "#dec657",
+                    "surface": "#fcfaef",
+                    "surface-bright": "#fcfaef",
+                    "secondary-fixed-dim": "#81d2ee",
+                    "on-tertiary-container": "#584b00",
+                    "on-surface-variant": "#404a3b",
+                    "on-secondary-fixed": "#001f28",
+                    "on-primary-fixed-variant": "#0a5300",
+                    "primary-fixed": "#9bf980",
+                    "on-primary-container": "#0b5800",
+                    "secondary": "#00677e",
+                    "surface-container": "#f0eee3",
+                    "surface-dim": "#dcdad0"
+            },
+            "borderRadius": {
+                    "DEFAULT": "1rem",
+                    "lg": "2rem",
+                    "xl": "3rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "unit": "8px",
+                    "container-padding": "24px",
+                    "section-margin": "40px",
+                    "element-gap": "16px",
+                    "max-width": "1200px"
+            },
+            "fontFamily": {
+                    "display-lg": [
+                            "Plus Jakarta Sans"
+                    ],
+                    "label-sm": [
+                            "Quicksand"
+                    ],
+                    "label-bold": [
+                            "Quicksand"
+                    ],
+                    "headline-lg": [
+                            "Plus Jakarta Sans"
+                    ],
+                    "body-md": [
+                            "Be Vietnam Pro"
+                    ],
+                    "body-lg": [
+                            "Be Vietnam Pro"
+                    ],
+                    "headline-lg-mobile": [
+                            "Plus Jakarta Sans"
+                    ]
+            },
+            "fontSize": {
+                    "display-lg": [
+                            "40px",
+                            {
+                                    "lineHeight": "48px",
+                                    "letterSpacing": "-0.02em",
+                                    "fontWeight": "800"
+                            }
+                    ],
+                    "label-sm": [
+                            "12px",
+                            {
+                                    "lineHeight": "16px",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "label-bold": [
+                            "14px",
+                            {
+                                    "lineHeight": "20px",
+                                    "fontWeight": "700"
+                            }
+                    ],
+                    "headline-lg": [
+                            "32px",
+                            {
+                                    "lineHeight": "40px",
+                                    "fontWeight": "700"
+                            }
+                    ],
+                    "body-md": [
+                            "16px",
+                            {
+                                    "lineHeight": "24px",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "body-lg": [
+                            "18px",
+                            {
+                                    "lineHeight": "28px",
+                                    "fontWeight": "500"
+                            }
+                    ],
+                    "headline-lg-mobile": [
+                            "24px",
+                            {
+                                    "lineHeight": "32px",
+                                    "fontWeight": "700"
+                            }
+                    ]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        /* Base subtle paper texture and soft aesthetic */
+        body {
+            background-color: theme('colors.background');
+            background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100' height='100' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Hide scrollbar for clean horizontal scrolls but keep functionality */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="font-body-md text-on-background h-screen flex overflow-hidden selection:bg-tertiary-fixed selection:text-on-tertiary-fixed">
+<!-- JSON: SideNavBar (Desktop) -->
+<nav class="hidden lg:flex flex-col h-screen sticky top-0 p-4 bg-surface-container-low dark:bg-surface-container-lowest h-full w-64 rounded-r-lg shadow-[4px_0_10px_rgba(75,63,54,0.05)] z-40 shrink-0">
+<!-- Header -->
+<div class="flex items-center gap-element-gap mb-8 px-2">
+<div class="w-12 h-12 rounded-full bg-primary-container flex items-center justify-center shadow-sm overflow-hidden border-2 border-surface-container-lowest">
+<img alt="Child's Growth Sprout" class="w-full h-full object-cover" data-alt="A small, stylized 3D rendered sprout pushing through rich brown soil inside a whimsical terracotta pot. The style is reminiscent of a high-end, cozy life-simulation game, featuring soft, squishy lighting, vibrant primary greens, and gentle shadows. The mood is nurturing and optimistic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCXZl-oYRN4FgkN3wL7M7_58xbEe6hZp62t6HzFYIe7R8GXGvvVT8lMExo34bZIctr3mkZLlDDK-KD2FEalN6wsQVCAmQGH5SYJL73FBOF5HO4e8308yWWdNiaCp1zKd65XTtuQbupKrZemudYe7XtxuvCuxDQ50tmbpOlmzlcvbEpEiIzkfGW5ONGPSDr5zMn-mzHigz3y8PPbJ7PktbRPcgq4mICUzZd1y9vZGBUk0kdz9EroWQgrqkDocRPSj6S-Du3kPg1JQ4yV"/>
+</div>
+<div>
+<h1 class="font-display-lg text-display-lg text-primary text-[24px] leading-tight tracking-tight">Island Life</h1>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Parental Portal</p>
+</div>
+</div>
+<!-- Main Navigation Tabs -->
+<ul class="flex flex-col gap-2 flex-1">
+<li>
+<a class="flex items-center gap-element-gap text-on-surface-variant hover:bg-surface-variant rounded-full px-4 py-3 font-label-bold text-label-bold hover:scale-105 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                    Dashboard
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-element-gap text-on-surface-variant hover:bg-surface-variant rounded-full px-4 py-3 font-label-bold text-label-bold hover:scale-105 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">settings_suggest</span>
+                    Control Center
+                </a>
+</li>
+<!-- ACTIVE TAB: Lab -->
+<li>
+<a class="flex items-center gap-element-gap bg-secondary-container text-on-secondary-container rounded-full px-4 py-3 shadow-[0_4px_0_0_#004e60] font-label-bold text-label-bold translate-y-1 shadow-none transition-all" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">science</span>
+                    Lab
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-element-gap text-on-surface-variant hover:bg-surface-variant rounded-full px-4 py-3 font-label-bold text-label-bold hover:scale-105 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">local_florist</span>
+                    Garden
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-element-gap text-on-surface-variant hover:bg-surface-variant rounded-full px-4 py-3 font-label-bold text-label-bold hover:scale-105 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">face</span>
+                    Child Mode
+                </a>
+</li>
+</ul>
+<!-- Switch CTA -->
+<div class="mt-auto mb-4">
+<button class="w-full bg-surface-variant text-on-surface-variant font-label-bold text-label-bold py-3 px-4 rounded-xl shadow-[0_4px_0_0_rgba(75,63,54,0.1)] hover:bg-surface-container-high transition-colors flex items-center justify-center gap-2 active:scale-95 active:translate-y-1 active:shadow-none">
+<span class="material-symbols-outlined">swap_horiz</span>
+                Switch to Child View
+            </button>
+</div>
+<!-- Footer Tabs -->
+<ul class="flex flex-col gap-2 pt-4 border-t border-outline-variant/30">
+<li>
+<a class="flex items-center gap-element-gap text-on-surface-variant hover:bg-surface-variant rounded-full px-4 py-3 font-label-bold text-label-bold hover:scale-105 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">help</span>
+                    Support
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-element-gap text-on-surface-variant hover:bg-surface-variant rounded-full px-4 py-3 font-label-bold text-label-bold hover:scale-105 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined">settings</span>
+                    Settings
+                </a>
+</li>
+</ul>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-screen overflow-y-auto relative bg-background">
+<!-- JSON: TopAppBar (Mobile/Tablet) -->
+<header class="lg:hidden flex justify-between items-center px-container-padding py-4 w-full max-w-max-width mx-auto bg-background dark:bg-surface-dim shadow-[0_4px_0_0_rgba(75,63,54,0.1)] docked full-width top-0 z-30 sticky">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full overflow-hidden border-2 border-primary-container">
+<img alt="Parent Profile Avatar" class="w-full h-full object-cover" data-alt="A warm, stylized avatar portrait of an adult. The art style is soft minimalism, akin to modern life simulation games. Gentle, diffuse lighting, smooth textures, and a cheerful expression. The background is a soft, warm cream color." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBiruIit0JtI_M7A5WKOICVtgACA53kYYFNAHINYnivqj0gAWmzHbqXagJ_oIg543A3zikZskp-sgc2xsn9yPFxfszlIhI0eXB0zCVJxq6IQXvAHKvpKY45U-bFNKkH1wZCDhcNUmy33HNgo0pv2SKanjOSw2uMR9TL4NHS0uzUKdezzZ1lJ1YmqtECxQ2NZs1ZYNqzWHuZtcXCgl7la08D0g9SZopgKW_7Qay1EDwbrDrxAcOHWAtorsF8Zyj5EjhPTOPeDc8q15tR"/>
+</div>
+<span class="font-display-lg text-display-lg text-[20px] leading-tight text-primary dark:text-primary-fixed tracking-tight">Island Care Portal</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="text-primary dark:text-primary-fixed p-2 rounded-full hover:bg-surface-variant transition-colors hover:text-primary-container dark:hover:text-primary-fixed-dim Active: scale-95 duration-100 ease-out">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-primary dark:text-primary-fixed p-2 rounded-full hover:bg-surface-variant transition-colors hover:text-primary-container dark:hover:text-primary-fixed-dim Active: scale-95 duration-100 ease-out">
+<span class="material-symbols-outlined">child_care</span>
+</button>
+</div>
+<!-- Note: Navigation links visually hidden on TopAppBar as per general "Responsive Pivot" logic for this complex dashboard, keeping it clean. -->
+</header>
+<!-- Canvas Content -->
+<div class="flex-1 w-full max-w-max-width mx-auto px-container-padding py-8 lg:py-section-margin flex flex-col gap-section-margin">
+<!-- Header Section with Search -->
+<section class="flex flex-col md:flex-row gap-6 justify-between items-start md:items-center bg-surface-container-low rounded-xl p-6 lg:p-8 shadow-[0_4px_0_0_rgba(75,63,54,0.05)] border border-outline-variant/20 relative overflow-hidden">
+<!-- Decorative background elements -->
+<div class="absolute -top-10 -right-10 w-40 h-40 bg-tertiary-fixed rounded-full opacity-20 blur-3xl pointer-events-none"></div>
+<div class="absolute -bottom-10 -left-10 w-32 h-32 bg-secondary-container rounded-full opacity-30 blur-2xl pointer-events-none"></div>
+<div class="flex flex-col max-w-lg relative z-10">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile md:font-headline-lg md:text-headline-lg text-on-surface mb-2">Evidence-Based Lab</h2>
+<p class="font-body-lg text-body-lg text-on-surface-variant">Your library of bite-sized, science-backed insights to support your child's growth.</p>
+</div>
+<div class="w-full md:w-96 relative z-10 group">
+<div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+<span class="material-symbols-outlined text-secondary">search</span>
+</div>
+<input class="w-full bg-surface-container-lowest border-4 border-secondary-fixed text-on-surface font-body-md rounded-full py-3 pl-12 pr-4 focus:outline-none focus:border-secondary focus:ring-0 shadow-sm transition-colors" placeholder="Search CBT, Executive Function..." type="text"/>
+<!-- Custom brown cursor simulated via care-color if possible, else standard -->
+</div>
+</section>
+<!-- Recommendation Engine: "Suggested for You" (Sticky Note Style) -->
+<section class="flex flex-col gap-4">
+<div class="flex items-center justify-between">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary">auto_awesome</span>
+                        Suggested for You
+                    </h3>
+<button class="text-primary font-label-bold text-label-bold hover:underline">View All</button>
+</div>
+<div class="flex overflow-x-auto gap-4 pb-4 no-scrollbar -mx-container-padding px-container-padding md:mx-0 md:px-0">
+<!-- Card 1 -->
+<div class="min-w-[280px] md:min-w-[320px] bg-secondary-container text-on-secondary-container rounded-lg p-5 shadow-[2px_4px_0_0_rgba(0,102,125,0.2)] relative transform rotate-1 hover:rotate-0 transition-transform duration-300">
+<div class="absolute -top-3 left-1/2 transform -translate-x-1/2 w-6 h-6 rounded-full bg-error-container border-2 border-white shadow-sm flex items-center justify-center">
+<div class="w-2 h-2 rounded-full bg-on-error-container"></div>
+</div>
+<div class="flex items-start gap-3 mb-3 mt-2">
+<span class="material-symbols-outlined bg-on-secondary-container text-secondary-container p-1.5 rounded-full text-sm">psychology</span>
+<h4 class="font-label-bold text-label-bold text-[16px] leading-tight">Navigating 'No': Defiance or Overwhelm?</h4>
+</div>
+<p class="font-body-md text-body-md opacity-90 mb-4 line-clamp-2">Based on recent struggles with Transitions, understanding the root cause is step one.</p>
+<div class="flex justify-between items-center mt-auto">
+<span class="font-label-sm text-label-sm px-2 py-1 bg-surface-container-lowest/50 rounded-full border border-on-secondary-container/20">3 min read</span>
+<button aria-label="Bookmark" class="p-2 hover:bg-surface-container-lowest/30 rounded-full transition-colors">
+<span class="material-symbols-outlined">bookmark_border</span>
+</button>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="min-w-[280px] md:min-w-[320px] bg-tertiary-fixed text-on-tertiary-fixed rounded-lg p-5 shadow-[2px_4px_0_0_rgba(110,94,0,0.2)] relative transform -rotate-1 hover:rotate-0 transition-transform duration-300">
+<div class="absolute -top-3 left-1/2 transform -translate-x-1/2 w-6 h-6 rounded-full bg-secondary-container border-2 border-white shadow-sm flex items-center justify-center">
+<div class="w-2 h-2 rounded-full bg-on-secondary-container"></div>
+</div>
+<div class="flex items-start gap-3 mb-3 mt-2">
+<span class="material-symbols-outlined bg-on-tertiary-fixed text-tertiary-fixed p-1.5 rounded-full text-sm">extension</span>
+<h4 class="font-label-bold text-label-bold text-[16px] leading-tight">Building Working Memory Games</h4>
+</div>
+<p class="font-body-md text-body-md opacity-90 mb-4 line-clamp-2">Fun, low-stakes activities to strengthen executive function during playtime.</p>
+<div class="flex justify-between items-center mt-auto">
+<span class="font-label-sm text-label-sm px-2 py-1 bg-surface-container-lowest/50 rounded-full border border-on-tertiary-fixed/20">5 min video</span>
+<button aria-label="Bookmark" class="p-2 hover:bg-surface-container-lowest/30 rounded-full transition-colors">
+<span class="material-symbols-outlined">bookmark_border</span>
+</button>
+</div>
+</div>
+</div>
+</section>
+<!-- Science Behind the Habit (Bento Grid) -->
+<section class="flex flex-col gap-4">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">biotech</span>
+                    Science Behind the Habit
+                </h3>
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- Large Feature Card (Speech Bubble Style) -->
+<div class="lg:col-span-2 bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-[0_4px_0_0_rgba(75,63,54,0.1)] border border-outline-variant/30 flex flex-col md:flex-row gap-6 relative">
+<!-- Speech bubble pointer -->
+<div class="absolute -bottom-3 left-8 w-6 h-6 bg-surface-container-lowest border-b border-l border-outline-variant/30 transform -rotate-45 z-0 shadow-[-2px_2px_0_0_rgba(75,63,54,0.05)]"></div>
+<div class="w-full md:w-1/3 aspect-square md:aspect-auto rounded-lg overflow-hidden border-4 border-surface-variant shrink-0 relative z-10">
+<img alt="Child Finger Reading" class="w-full h-full object-cover" data-alt="A close-up, highly detailed illustration of a child's small hand pointing at words in a beautifully illustrated pop-up storybook. The scene is bathed in warm, soft sunlight creating gentle shadows. The art style is tactile and 'squishy', resembling high-quality papercraft or thick cardstock, emphasizing an inviting, nurturing, and safe educational environment." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB-R4qU85kY7237jlIOnBi4O4YMKjEgzm2RxqMOSR1w_8BaTTZNnNZK_9RrBt4kXO_riGFS7-wV5W2g5Eqq-FVBh1n-SD3Kgs0sTIfM2k8z8qLtI4U2nKPPNlgswdbQserpzdUowF-LCT5D5VHl-JyZf8fvB9NsyKCKxg_6lQZ_FoEwqDgcBL4TzBjZJucbw5eJGesENmEu-ErDskU0spLxgyKkKPl1qUtmxnU4pIkEYRhQjSLLAQ1dXspK8NzvNJMSg5TDP2YUJd5K"/>
+</div>
+<div class="flex flex-col justify-center relative z-10">
+<div class="inline-flex items-center gap-1 bg-primary-container text-on-primary-container font-label-sm text-label-sm px-3 py-1 rounded-full mb-3 w-max border border-white rotate-2 shadow-sm">
+<span class="material-symbols-outlined text-[14px]">sell</span> Metacognition
+                            </div>
+<h4 class="font-display-lg text-display-lg text-[24px] leading-tight text-on-surface mb-2">Why "Finger-Point Reading" Works</h4>
+<p class="font-body-md text-body-md text-on-surface-variant mb-4">It's not just for beginners. Physically tracking words reduces the cognitive load on working memory, allowing the brain to focus entirely on comprehension rather than tracking location.</p>
+<button class="w-max bg-primary text-on-primary font-label-bold text-label-bold py-2 px-6 rounded-full border-b-4 border-on-primary-fixed-variant hover:scale-105 active:scale-95 active:border-b-0 active:translate-y-1 transition-all duration-150 shadow-sm">
+                                Read Full Study
+                            </button>
+</div>
+</div>
+<!-- Smaller Bento Card -->
+<div class="bg-surface-container-high rounded-xl p-6 shadow-[0_4px_0_0_rgba(75,63,54,0.08)] flex flex-col relative overflow-hidden">
+<!-- Decorative background -->
+<div class="absolute right-[-20px] top-[-20px] opacity-10 pointer-events-none">
+<span class="material-symbols-outlined text-[120px] text-primary">spa</span>
+</div>
+<div class="inline-flex items-center gap-1 bg-secondary text-on-secondary font-label-sm text-label-sm px-3 py-1 rounded-full mb-4 w-max border border-white -rotate-1 shadow-sm">
+                            CBT Basics
+                        </div>
+<h4 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface mb-2 relative z-10">The "Pause Button" Technique</h4>
+<p class="font-body-md text-body-md text-on-surface-variant mb-4 relative z-10 flex-1">Teaching a child to mentally "press pause" interrupts the amygdala hijack, allowing the prefrontal cortex time to engage before a reaction.</p>
+<a class="font-label-bold text-label-bold text-primary hover:text-primary-fixed-dim inline-flex items-center gap-1 group relative z-10 w-max" href="#">
+                            Watch 2min Video
+                            <span class="material-symbols-outlined group-hover:translate-x-1 transition-transform">arrow_forward</span>
+</a>
+</div>
+</div>
+</section>
+<!-- Searchable Library (Grid) -->
+<section class="flex flex-col gap-6 mt-4">
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary">library_books</span>
+                        Browse Library
+                    </h3>
+<!-- Filters (Sticker Chips) -->
+<div class="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+<button class="bg-surface-container-lowest border-2 border-primary text-primary font-label-bold text-label-bold px-4 py-1.5 rounded-full shadow-sm hover:bg-primary-container hover:text-on-primary-container transition-colors whitespace-nowrap">All Topics</button>
+<button class="bg-surface-variant border-2 border-transparent text-on-surface-variant font-label-bold text-label-bold px-4 py-1.5 rounded-full shadow-sm hover:bg-surface-container-highest transition-colors whitespace-nowrap">Executive Function</button>
+<button class="bg-surface-variant border-2 border-transparent text-on-surface-variant font-label-bold text-label-bold px-4 py-1.5 rounded-full shadow-sm hover:bg-surface-container-highest transition-colors whitespace-nowrap">Anxiety &amp; CBT</button>
+</div>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+<!-- Library Item 1 -->
+<div class="group bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 hover:shadow-[0_8px_0_0_rgba(75,63,54,0.1)] hover:-translate-y-1 transition-all duration-200 cursor-pointer flex flex-col h-full overflow-hidden">
+<div class="h-40 bg-surface-variant relative overflow-hidden">
+<img alt="Child solving puzzle" class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" data-alt="A warm, bright, high-key illustration of wooden geometric puzzle pieces scattered on a soft cream-colored mat. The style is soft minimalism, akin to modern high-end life simulation graphics, featuring tactile, realistic wood textures and gentle, bouncy shadows. A subtle soft green plant leaf intrudes into the frame's edge. Nurturing, calm atmosphere." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBsdTzQ7DSfDat99Jy-KmuRjP2B8afIkJrW2tOiHHALFVG5yF1HMbgHGde_AhIgrPM87VWuz7tf54Nii7_p5UqJ0F-G3ARKfUM9W1K9wvComyRSOwbzubEz_otN13OHEeZcoNBiJ_twp_oFQKp06B7UhGmU8JztNILR1IOAsOtiqOjrloLNBWR9EC6yusSBO4d7ygftozqBzFPc4PuqnKpiBHUVGpygBqvZsRasMh5ScPNV54JhvXHtcN0mGL4STWkRn8speFOYi6Ho"/>
+<!-- Bookmark icon pinned to image -->
+<button class="absolute top-3 right-3 w-8 h-8 rounded-full bg-surface-container-lowest/80 backdrop-blur-sm flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-lowest transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[20px]">bookmark</span>
+</button>
+</div>
+<div class="p-5 flex flex-col flex-1">
+<span class="font-label-sm text-label-sm text-secondary mb-1">Article</span>
+<h4 class="font-label-bold text-label-bold text-[16px] text-on-surface mb-2 leading-tight group-hover:text-primary transition-colors">Chunking Tasks for ADHD</h4>
+<p class="font-body-md text-body-md text-on-surface-variant line-clamp-2 mb-4">Break down massive chores into micro-quests to bypass overwhelm.</p>
+</div>
+</div>
+<!-- Library Item 2 -->
+<div class="group bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 hover:shadow-[0_8px_0_0_rgba(75,63,54,0.1)] hover:-translate-y-1 transition-all duration-200 cursor-pointer flex flex-col h-full overflow-hidden">
+<div class="h-40 bg-tertiary-container relative overflow-hidden flex items-center justify-center">
+<span class="material-symbols-outlined text-on-tertiary-container text-[48px] opacity-50 absolute">play_circle</span>
+<img alt="Deep breathing visual" class="w-full h-full object-cover mix-blend-overlay opacity-80 group-hover:opacity-100 transition-opacity group-hover:scale-105 duration-500" data-alt="A whimsical, softly glowing illustration representing 'breath'. It features a large, squishy, translucent blue-green bubble expanding against a warm, paper-textured background of cream and pale yellow. The lighting is ethereal and soothing, evoking a deep sense of calm and safety, matching an organic, child-friendly design aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBrQ4zHoH7BB53tM84KJxmE7-bIlvN5o0HABtiLdtpILQ32zLec8kZZtUVFx2e4lcZqgq85IjEZbfu5OXK3JQySm2zHEqu4bGqFJe91p169Z-5Hl5JFVxx89-WY4tNgHoGUKul6s5ByDc94E2lDE0FNybfXKJhRbt7--BUbaAl8DfGK3EXYIrYvpeaRctK-IABbVeRCJLcxM6VMo1CyAKqUp8KmyJOfQfMmxVBcDrBCKAmPEun8P8sLKD56MufFMKt32pynLPCYUtIf"/>
+<button class="absolute top-3 right-3 w-8 h-8 rounded-full bg-surface-container-lowest/80 backdrop-blur-sm flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-lowest transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[20px]">bookmark_border</span>
+</button>
+</div>
+<div class="p-5 flex flex-col flex-1">
+<span class="font-label-sm text-label-sm text-tertiary mb-1">Video • 4 min</span>
+<h4 class="font-label-bold text-label-bold text-[16px] text-on-surface mb-2 leading-tight group-hover:text-primary transition-colors">Box Breathing Visualized</h4>
+<p class="font-body-md text-body-md text-on-surface-variant line-clamp-2 mb-4">A simple, follow-along animation to co-regulate with your child.</p>
+</div>
+</div>
+<!-- Library Item 3 -->
+<div class="group bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 hover:shadow-[0_8px_0_0_rgba(75,63,54,0.1)] hover:-translate-y-1 transition-all duration-200 cursor-pointer flex flex-col h-full overflow-hidden">
+<div class="h-40 bg-primary-container relative overflow-hidden">
+<img alt="Routine chart" class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" data-alt="A stylized, cheerful illustration of a morning routine chart made of thick cardstock paper, pinned to a soft corkboard. The illustration uses a 'soft minimalism' 3D aesthetic. Icons like a toothbrush and a sun are visible. The color palette is composed of comforting sky blues, crisp whites, and gentle greens. The mood is highly organized yet playful and reassuring." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA0EXU82OgkZITF2U-lBAFzwrhRfhAWHtQHLf42yla6Dz-gW4LJKrosEVkUVIyr1MCSBEhs_e7XAEVazOdR-nVUkV1BzIeVIjrt0djK-XbHrpz2DCvsRW88uAhp676BMfr4tb6fERWrC6pfWNdiU7vv7AAfQDOcd5qE8uZN3mzCfVtrvTXoauwmVYHhJ3_18hOBbaF7BpYiI6nzwP5O3DiHAzVAYqrDXYl-O2Kz-tg6UEZKt1hiW0U7WUU9DiCzR-KWyQf4zPz4Txrp"/>
+<button class="absolute top-3 right-3 w-8 h-8 rounded-full bg-surface-container-lowest/80 backdrop-blur-sm flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-lowest transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[20px]">bookmark_border</span>
+</button>
+</div>
+<div class="p-5 flex flex-col flex-1">
+<span class="font-label-sm text-label-sm text-primary mb-1">Template</span>
+<h4 class="font-label-bold text-label-bold text-[16px] text-on-surface mb-2 leading-tight group-hover:text-primary transition-colors">Visual Routine Cards</h4>
+<p class="font-body-md text-body-md text-on-surface-variant line-clamp-2 mb-4">Downloadable, printable cards to create a predictable morning flow.</p>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- JSON: Footer -->
+<footer class="w-full py-8 px-container-padding flex flex-col md:flex-row justify-between items-center gap-4 bg-surface-container-highest dark:bg-inverse-surface border-t-2 border-outline-variant flat no shadows full-width bottom-0 mt-section-margin shrink-0">
+<div class="font-label-bold text-label-bold text-primary">
+                © 2024 Island Growth Systems. Nurturing every sprout.
+            </div>
+<ul class="flex flex-wrap items-center gap-4 md:gap-6">
+<li>
+<a class="text-on-surface-variant dark:text-surface-variant font-label-sm text-label-sm hover:underline decoration-2 decoration-primary transition-opacity hover:opacity-80" href="#">Support Center</a>
+</li>
+<li>
+<a class="text-on-surface-variant dark:text-surface-variant font-label-sm text-label-sm hover:underline decoration-2 decoration-primary transition-opacity hover:opacity-80" href="#">Privacy Policy</a>
+</li>
+<li>
+<a class="text-on-surface-variant dark:text-surface-variant font-label-sm text-label-sm hover:underline decoration-2 decoration-primary transition-opacity hover:opacity-80" href="#">Community Guidelines</a>
+</li>
+<li>
+<a class="text-on-surface-variant dark:text-surface-variant font-label-sm text-label-sm hover:underline decoration-2 decoration-primary transition-opacity hover:opacity-80" href="#">Safety Resources</a>
+</li>
+</ul>
+</footer>
+</main>
+</body></html>
