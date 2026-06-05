@@ -55,6 +55,8 @@ articles ──1:N── article_bookmarks
 | focus_attention | SMALLINT | NOT NULL, CHECK 1-5 | 专注持久度评分 |
 | organization | SMALLINT | NOT NULL, CHECK 1-5 | 物品整洁度评分 |
 | emotional_control | SMALLINT | NOT NULL, CHECK 1-5 | 情绪克制力评分 |
+| planning | SMALLINT | NOT NULL, CHECK 1-5 | 计划启动力评分 |
+| impulse_control | SMALLINT | NOT NULL, CHECK 1-5 | 冲动抑制力评分 |
 | recommended_level | SMALLINT | NOT NULL, CHECK 1-5 | 推荐难度等级 |
 | task_density | VARCHAR(20) | NOT NULL | 任务密度(low/medium/high) |
 | source | VARCHAR(20) | DEFAULT 'initial' | 来源(initial/dynamic修正) |

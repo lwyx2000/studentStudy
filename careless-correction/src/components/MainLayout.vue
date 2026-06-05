@@ -1,60 +1,55 @@
 <script setup lang="ts">
-import { useRouter, useRoute } from 'vue-router'
-import { useUserStore } from '../stores'
 import { computed } from 'vue'
-import { Button } from 'animal-island-vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useUserStore } from '../stores'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
 const isParent = computed(() => userStore.profile.role === 'parent')
-
 const childNavItems = [
-  { name: 'Dashboard', path: '/dashboard', icon: '🌿', label: '主页' },
-  { name: 'HabitCenter', path: '/habit', icon: '✅', label: '习惯中心' },
-  { name: 'MistakeBook', path: '/mistake', icon: '📖', label: '错题本' },
-  { name: 'ItemTracker', path: '/tracker', icon: '🎒', label: '物品追踪' },
-  { name: 'BadgeRoom', path: '/badge', icon: '🏅', label: '勋章馆' },
+  { name: 'Dashboard', path: '/dashboard', icon: '🌳', label: '协同仪表盘' },
+  { name: 'HabitCenter', path: '/habit', icon: '✅', label: '习惯打印' },
+  { name: 'MistakeBook', path: '/mistake', icon: '🔎', label: '黄金一问' },
+  { name: 'ItemTracker', path: '/tracker', icon: '🎒', label: '物品实验室' },
+  { name: 'GrowthArchive', path: '/growth', icon: '📈', label: '成长档案' },
+  { name: 'TimeTaskCabin', path: '/time-task', icon: '⏱️', label: '自治舱' },
+  { name: 'BadgeRoom', path: '/badge', icon: '🏅', label: '契约勋章' },
 ]
-
 const parentNavItems = [
-  { name: 'ParentControl', path: '/parent', icon: '⚙️', label: '控制中心' },
+  { name: 'ParentControl', path: '/parent', icon: '🧭', label: '家长控制' },
   { name: 'EvidenceLab', path: '/parent/lab', icon: '🔬', label: '循证实验室' },
   { name: 'CommunityGarden', path: '/parent/garden', icon: '🌸', label: '社区花园' },
 ]
-
-const navItems = computed(() => isParent.value ? parentNavItems : childNavItems)
+const navItems = computed(() => (isParent.value ? parentNavItems : childNavItems))
 
 function switchRole() {
-  userStore.setProfile({ role: userStore.profile.role === 'child' ? 'parent' : 'child' })
-  if (userStore.profile.role === 'parent') {
-    router.push('/parent')
-  } else {
-    router.push('/dashboard')
-  }
+  const nextRole = userStore.profile.role === 'child' ? 'parent' : 'child'
+  userStore.setProfile({ role: nextRole })
+  router.push(nextRole === 'parent' ? '/parent' : '/dashboard')
 }
 </script>
 
 <template>
-  <div class="main-layout">
-    <header class="top-bar">
-      <div class="top-bar-left">
-        <span class="logo-text">小树成长岛</span>
-      </div>
-      <div class="top-bar-right">
-        <div class="sunlight-badge">
-          <span class="material-icon">☀️</span>
-          <span>{{ userStore.sunlightPoints }} 阳光值</span>
-        </div>
-        <Button type="text" size="small" @click="router.push('/badge')">🏅</Button>
-        <Button type="text" size="small" @click="switchRole">👤</Button>
+  <div class="shell">
+    <header class="topbar">
+      <button class="brand" @click="router.push('/dashboard')">
+        <span class="brand-mark">🌿</span>
+        <span>小树成长岛</span>
+      </button>
+      <div class="top-actions">
+        <span class="pill">☀️ {{ userStore.sunlightPoints || 120 }} 阳光值</span>
+        <span class="pill">Lv{{ userStore.assessment.recommendedLevel }} · {{ userStore.profile.grade || 3 }}年级</span>
+        <button class="role-btn" @click="switchRole">{{ isParent ? '切到孩子视角' : '家长入口' }}</button>
       </div>
     </header>
-    <aside class="side-nav">
-      <div class="nav-avatar">
-        <div class="avatar-circle">🌿</div>
-        <span class="avatar-level">Lv{{ userStore.assessment.recommendedLevel }}</span>
+
+    <aside class="sidebar">
+      <div class="tree-card">
+        <div class="tree-visual">🌱</div>
+        <strong>{{ userStore.profile.name || 'Leo' }} 的成长树</strong>
+        <span>今天只聚焦 1 个核心习惯</span>
       </div>
       <nav class="nav-list">
         <router-link
@@ -64,118 +59,34 @@ function switchRole() {
           class="nav-item"
           :class="{ active: route.name === item.name }"
         >
-          <span class="nav-icon">{{ item.icon }}</span>
+          <span>{{ item.icon }}</span>
           <span>{{ item.label }}</span>
         </router-link>
       </nav>
-      <div class="nav-footer">
-        <Button type="dashed" block @click="switchRole">
-          {{ isParent ? '切换到孩子视角' : '家长入口' }}
-        </Button>
-      </div>
     </aside>
-    <main class="main-content">
+
+    <main class="content">
       <router-view />
     </main>
   </div>
 </template>
 
 <style scoped>
-.main-layout {
-  display: grid;
-  grid-template-columns: 220px 1fr;
-  grid-template-rows: 56px 1fr;
-  min-height: 100vh;
-  background: #fcfaef;
-}
-.top-bar {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-  background: #f0e8d0;
-  border-bottom: 2px solid #e4e3d8;
-}
-.logo-text {
-  font-family: 'Nunito', 'Noto Sans SC', sans-serif;
-  font-size: 20px;
-  font-weight: 700;
-  color: #106e00;
-}
-.top-bar-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.sunlight-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  background: #fbe270;
-  border-radius: 20px;
-  font-weight: 600;
-  color: #6e5e00;
-}
-.side-nav {
-  display: flex;
-  flex-direction: column;
-  padding: 16px 8px;
-  background: #f7f3df;
-  border-right: 2px solid #e4e3d8;
-}
-.nav-avatar {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 24px;
-}
-.avatar-circle {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: #8ac68a;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-}
-.avatar-level {
-  margin-top: 4px;
-  font-weight: 700;
-  color: #106e00;
-}
-.nav-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 12px;
-  text-decoration: none;
-  color: #725d42;
-  transition: all 0.2s;
-}
-.nav-item:hover {
-  background: #e4e3d8;
-}
-.nav-item.active {
-  background: #106e00;
-  color: white;
-}
-.nav-icon {
-  font-size: 18px;
-}
-.nav-footer {
-  margin-top: auto;
-}
-.main-content {
-  padding: 24px;
-  overflow-y: auto;
-}
+.shell { min-height: 100vh; display: grid; grid-template-columns: 260px 1fr; grid-template-rows: 76px 1fr; background: var(--bg); }
+.topbar { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; padding: 0 28px; position: sticky; top: 0; z-index: 10; background: rgba(252,250,239,.9); backdrop-filter: blur(16px); border-bottom: 1px solid var(--line); }
+.brand { display: inline-flex; align-items: center; gap: 12px; color: var(--primary); background: transparent; font-size: 22px; font-weight: 950; letter-spacing: -.03em; }
+.brand-mark { width: 44px; height: 44px; border-radius: 16px; display: grid; place-items: center; background: var(--yellow); }
+.top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.pill, .role-btn { display: inline-flex; align-items: center; border-radius: 999px; padding: 9px 13px; background: #fff; border: 1px solid var(--line); font-weight: 800; }
+.role-btn { color: #fff; background: var(--primary); border-color: var(--primary); }
+.sidebar { padding: 20px 14px; border-right: 1px solid var(--line); background: rgba(246,244,233,.8); }
+.tree-card { padding: 18px; border-radius: 26px; background: #fff; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(75,63,54,.08); display: flex; flex-direction: column; gap: 8px; }
+.tree-visual { height: 86px; display: grid; place-items: center; border-radius: 22px; background: linear-gradient(180deg, #c9f2ff, #f6ffd7); font-size: 48px; }
+.tree-card span { color: var(--muted); font-size: 13px; }
+.nav-list { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 18px; color: var(--muted); text-decoration: none; font-weight: 850; }
+.nav-item:hover { background: rgba(255,255,255,.8); color: var(--ink); }
+.nav-item.active { color: #fff; background: var(--primary); box-shadow: 0 10px 24px rgba(16,110,0,.22); }
+.content { padding: 28px; overflow: auto; }
+@media (max-width: 860px) { .shell { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; } .topbar { position: static; align-items: flex-start; gap: 12px; flex-direction: column; padding: 16px; } .sidebar { border-right: 0; border-bottom: 1px solid var(--line); } .tree-card { display: none; } .nav-list { margin: 0; flex-direction: row; overflow-x: auto; } .nav-item { white-space: nowrap; } .content { padding: 18px; } }
 </style>

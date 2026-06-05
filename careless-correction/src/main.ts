@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import router from './router'
 import 'animal-island-vue/style'
+import './style.css'
 import App from './App.vue'
 
 const app = createApp(App)

@@ -1,291 +1,34 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useUserStore, useGrowthStore } from '../../stores'
-import { Button, Card, Title, Divider, Input } from 'animal-island-vue'
+import { computed, ref } from 'vue'
+import { useGrowthStore, useUserStore } from '../../stores'
 
-const userStore = useUserStore()
 const growthStore = useGrowthStore()
-
-const itemName = ref('')
-const lostLocation = ref('')
-const beforeImage = ref<string | null>(null)
-const afterImage = ref<string | null>(null)
-
-const locations = ['学校', '公交/地铁', '家里', '操场', '其他']
-
-const lossStats = computed(() => {
-  const records = growthStore.itemLossRecords
-  const totalCost = records.reduce((sum, r) => sum + r.estimatedCost, 0)
-  const highFreqItems = records.filter(r => r.frequency >= 3)
-  return { totalCost, highFreqItems, totalRecords: records.length }
-})
+const userStore = useUserStore()
+const itemName = ref('橡皮')
+const lostLocation = ref('教室抽屉')
+const estimatedCost = ref(3)
+const beforeName = ref('')
+const afterName = ref('')
+const totalFrequency = computed(() => growthStore.itemLossRecords.reduce((sum, item) => sum + item.frequency, 0))
 
 function reportLoss() {
-  growthStore.itemLossRecords.push({
-    id: Date.now().toString(),
-    itemName: itemName.value,
-    lostLocation: lostLocation.value,
-    lostDate: new Date().toISOString(),
-    estimatedCost: 5,
-    frequency: 1,
-  })
-  itemName.value = ''
-  lostLocation.value = ''
+  growthStore.addItemLossRecord({ itemName: itemName.value, lostLocation: lostLocation.value, estimatedCost: estimatedCost.value })
 }
-
-const virtualBagItems = [
-  { name: '铅笔', status: 'safe', color: '#8ac68a' },
-  { name: '橡皮', status: 'lost', color: '#fc736d', alert: true },
-  { name: '水杯', status: 'safe', color: '#8ac68a' },
-  { name: '课本', status: 'safe', color: '#8ac68a' },
-  { name: '尺子', status: 'lost', color: '#fc736d' },
-  { name: '文具盒', status: 'safe', color: '#8ac68a' },
-]
+function handlePhoto(event: Event, target: 'before' | 'after') {
+  const name = (event.target as HTMLInputElement).files?.[0]?.name || ''
+  if (target === 'before') beforeName.value = name
+  else {
+    afterName.value = name
+    if (beforeName.value) userStore.addSunlightPoints(10)
+  }
+}
 </script>
 
 <template>
-  <div class="item-tracker">
-    <Title size="large" color="app-orange">物品流失追踪与收纳实验室</Title>
-
-    <Card color="app-teal" type="title" class="bag-section">
-      <template #title>
-        <Title size="middle" color="app-teal">虚拟书包透视图</Title>
-      </template>
-      <div class="virtual-bag">
-        <div
-          v-for="item in virtualBagItems"
-          :key="item.name"
-          class="bag-item"
-          :class="{ lost: item.status === 'lost', alert: item.alert }"
-          :style="{ borderColor: item.color }"
-        >
-          < name="icon-map" v-if="item.status === 'safe'" />
-          <span v-if="item.status === 'lost'" class="lost-tag">丢失</span>
-          <span class="item-name">{{ item.name }}</span>
-        </div>
-      </div>
-      <div class="alert-cards" v-if="lossStats.highFreqItems.length">
-        <Card v-for="item in lossStats.highFreqItems" :key="item.id" color="app-red">
-          <div class="breathing-alert">
-            <Title size="small" color="app-red">高频流失警报: {{ item.itemName }}</Title>
-            <p>30天内丢失{{ item.frequency }}次! 建议立刻贴上荧光色姓名贴。</p>
-          </div>
-        </Card>
-      </div>
-    </Card>
-
-    <Divider type="wave-yellow" />
-
-    <div class="loss-report-section">
-      <Card color="app-yellow" type="title">
-        <template #title>
-          <Title size="middle" color="app-yellow">报告物品丢失</Title>
-        </template>
-        <div class="report-form">
-          <div class="form-group">
-            <label>丢失物品名称</label>
-            <Input v-model="itemName" placeholder="如：橡皮、水杯" shadow />
-          </div>
-          <div class="form-group">
-            <label>丢失地点</label>
-            <div class="location-selector">
-              <Button
-                v-for="loc in locations"
-                :key="loc"
-                :type="lostLocation === loc ? 'primary' : 'default'"
-                size="small"
-                @click="lostLocation = loc"
-              >
-                {{ loc }}
-              </Button>
-            </div>
-          </div>
-          <Button type="primary" block @click="reportLoss">记录丢失</Button>
-        </div>
-      </Card>
-    </div>
-
-    <Divider type="wave-yellow" />
-
-    <div class="stats-section">
-      <div class="stats-grid">
-        <Card color="app-blue" type="title">
-          <template #title>
-            <Title size="small" color="app-blue">丢失地点雷达</Title>
-          </template>
-          <div class="radar-chart">
-            <div class="radar-placeholder">地点分布图</div>
-          </div>
-        </Card>
-        <Card color="app-orange" type="title">
-          <template #title>
-            <Title size="small" color="app-orange">累计损失账单</Title>
-          </template>
-          <div class="cost-chart">
-            <p class="total-cost">累计损失: ¥{{ lossStats.totalCost }}</p>
-            <div class="cost-line-placeholder">折线图</div>
-          </div>
-        </Card>
-      </div>
-    </div>
-
-    <Divider type="dashed-brown" />
-
-    <Card color="app-green" type="title">
-      <template #title>
-        <Title size="middle" color="app-green">收纳前后对比</Title>
-      </template>
-      <div class="before-after">
-        <div class="comparison-slider">
-          <div class="before-side">
-            <div class="photo-placeholder" @click="beforeImage = 'uploaded'">
-              <Icon name="icon-camera" />
-              <p>拍摄凌乱桌面</p>
-            </div>
-          </div>
-          <div class="after-side">
-            <div class="photo-placeholder" @click="afterImage = 'uploaded'">
-              <Icon name="icon-camera" />
-              <p>拍摄整理后桌面</p>
-            </div>
-          </div>
-        </div>
-        <Button type="primary" @click="userStore.addSunlightPoints(15)">
-          上传对比，赢取阳光值!
-        </Button>
-      </div>
-    </Card>
+  <div class="page">
+    <section class="page-hero"><div class="hero-card"><span class="eyebrow">🎒 物品流失追踪与收纳实验室</span><h1>让丢东西变成可观察的收纳实验</h1><p class="lead">记录物品、地点、频次和成本；当 30 天内同一物品丢失满 3 次，会触发急救建议。</p></div><div class="panel"><div class="card-title"><h2>本月流失成本</h2><span class="tag">{{ totalFrequency }} 次</span></div><div class="kpi"><strong>¥{{ growthStore.totalLossCost }}</strong><span>累计账单会随上报自动更新</span></div></div></section>
+    <section class="grid-3"><div class="soft-card"><div class="icon-tile">📍</div><h2>高发地点雷达</h2><div class="radar"><span v-for="item in growthStore.itemLossRecords" :key="item.id">{{ item.lostLocation }} · {{ item.frequency }}</span></div></div><div class="soft-card"><div class="icon-tile">🧺</div><h2>虚拟书包三分区</h2><div class="bag"><span>作业区</span><span>文具区</span><span>回执区</span></div></div><div class="soft-card"><div class="icon-tile">🚑</div><h2>高频流失急救</h2><template v-if="growthStore.highFrequencyItems.length"><p v-for="item in growthStore.highFrequencyItems" :key="item.id" class="alert">{{ item.itemName }} 30 天内 {{ item.frequency }} 次：贴荧光姓名贴，用完放回笔盒右侧。</p></template><p v-else class="lead">暂未触发高频流失。</p></div></section>
+    <section class="grid-2"><div class="panel"><div class="card-title"><h2>新增丢失记录</h2><button class="btn" @click="reportLoss">上报</button></div><div class="grid-3"><input v-model="itemName" class="input" placeholder="物品"/><input v-model="lostLocation" class="input" placeholder="地点"/><input v-model.number="estimatedCost" class="input" type="number" min="0"/></div><div class="list"><div v-for="row in growthStore.itemLossRecords" :key="row.id" class="list-row"><span>{{ row.itemName }}｜{{ row.lostLocation }}｜第{{ row.frequency }}次</span><span>¥{{ row.estimatedCost * row.frequency }}</span></div></div></div><div class="panel"><div class="card-title"><h2>收纳前后对比</h2><span class="tag">上传后 +10 阳光</span></div><div class="compare"><label>Before<input type="file" accept="image/*" @change="handlePhoto($event, 'before')"/><span>{{ beforeName || '上传凌乱桌面' }}</span></label><label>After<input type="file" accept="image/*" @change="handlePhoto($event, 'after')"/><span>{{ afterName || '上传整理后桌面' }}</span></label></div></div></section>
   </div>
 </template>
-
-
-
-<style scoped>
-.item-tracker {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.virtual-bag {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 12px;
-}
-
-.bag-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 12px;
-  border: 2px solid;
-  border-radius: 12px;
-  background: #f7f3df;
-  transition: all 0.2s;
-}
-
-.bag-item.lost {
-  background: #fce4e4;
-}
-
-.bag-item.alert {
-  animation: breathing 2s ease-in-out infinite;
-}
-
-.lost-tag {
-  background: #fc736d;
-  color: white;
-  padding: 2px 8px;
-  border-radius: 8px;
-  font-size: 12px;
-}
-
-.item-name {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-@keyframes breathing {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-.breathing-alert {
-  animation: breathing 2s ease-in-out infinite;
-}
-
-.report-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-group label {
-  font-weight: 600;
-  color: #725d42;
-}
-
-.location-selector {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-.radar-placeholder,
-.cost-line-placeholder {
-  height: 200px;
-  background: #e4e3d8;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #725d42;
-  font-size: 14px;
-}
-
-.total-cost {
-  font-size: 20px;
-  font-weight: 700;
-  color: #e59266;
-}
-
-.before-after {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.comparison-slider {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.photo-placeholder {
-  height: 160px;
-  background: #f7f3df;
-  border: 2px dashed #9a835a;
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  color: #725d42;
-}
-</style>
+<style scoped>.radar,.bag{display:grid;gap:10px}.radar span,.bag span{padding:12px;border-radius:16px;background:#fff;border:1px solid var(--line);font-weight:800}.alert{padding:12px;border-radius:18px;background:#ffdad6;color:#93000a;animation:pulse 1.5s infinite}.compare{display:grid;grid-template-columns:1fr 1fr;gap:12px}.compare label{min-height:180px;border:2px dashed var(--line);border-radius:22px;display:grid;place-items:center;text-align:center;font-weight:900}.compare input{display:none}@keyframes pulse{50%{box-shadow:0 0 0 8px rgba(255,0,0,.08)}}@media(max-width:900px){.compare{grid-template-columns:1fr}}</style>

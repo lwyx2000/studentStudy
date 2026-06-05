@@ -119,7 +119,9 @@ POST /api/v1/assessments
   "userId": "user_xxx",
   "focusAttention": 3,
   "organization": 2,
-  "emotionalControl": 4
+  "emotionalControl": 4,
+  "planning": 3,
+  "impulseControl": 4
 }
 ```
 
@@ -130,6 +132,7 @@ POST /api/v1/assessments
     "id": "assessment_xxx",
     "recommendedLevel": 3,
     "taskDensity": "medium",
+    "assessmentDimensions": 5,
     "createdAt": "2026-06-05T10:00:00Z"
   }
 }
@@ -733,6 +736,8 @@ POST /api/v1/print/scan
 {
   "data": {
     "recognized": true,
+    "checkedCount": 5,
+    "report": "已识别 5 个勾选，建议继续保持指读圈号。",
     "recognizedChecks": { "mon_habit": true, "tue_habit": true, "wed_habit": false },
     "completionRate": 0.67,
     "pointsEarned": 15,

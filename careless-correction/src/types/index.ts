@@ -10,6 +10,8 @@ export interface ExecutiveFunctionAssessment {
   focusAttention: number
   organization: number
   emotionalControl: number
+  planning: number
+  impulseControl: number
   recommendedLevel: number
 }
 
