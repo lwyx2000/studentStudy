@@ -1,318 +1,43 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { usePomodoroStore } from '../../stores'
 
-
-const timerMinutes = ref(25)
-const timerSeconds = ref(0)
-const isRunning = ref(false)
-let timerInterval: ReturnType<typeof setInterval> | null = null
-
-const selectedDrainReason = ref<string | null>(null)
-const uncertainCount = ref(0)
-
-const drainReasons = ['读题耗时', '验算耗时', '发呆神游了']
-
-const totalSeconds = computed(() => timerMinutes.value * 60 + timerSeconds.value)
-const progressPercent = computed(() => {
-  const elapsed = 25 * 60 - totalSeconds.value
-  return Math.min(100, (elapsed / (25 * 60)) * 100)
+const pomodoroStore = usePomodoroStore()
+const subject = ref('数学')
+const estimate = ref(30)
+const actual = ref(45)
+const reason = ref('')
+let timer: number | undefined
+const remainingText = computed(() => {
+  const minutes = Math.floor(pomodoroStore.remainingSeconds / 60).toString().padStart(2, '0')
+  const seconds = (pomodoroStore.remainingSeconds % 60).toString().padStart(2, '0')
+  return `${minutes}:${seconds}`
 })
+const diff = computed(() => actual.value - estimate.value)
 
-const timelineItems = [
-  { date: '6月5日', title: '数学复习', type: 'exam' },
-  { date: '6月8日', title: '科学测验', type: 'quiz' },
-  { date: '6月12日', title: '英语期考', type: 'exam' },
-]
-
-const subjectEstimations = [
-  { subject: '数学', estimated: 30, actual: 45 },
-  { subject: '历史', estimated: 20, actual: 18 },
-]
-
-function startTimer() {
-  isRunning.value = true
-  timerMinutes.value = 25
-  timerSeconds.value = 0
-  timerInterval = setInterval(() => {
-    if (timerSeconds.value === 0) {
-      if (timerMinutes.value === 0) {
-        stopTimer()
-        return
-      }
-      timerMinutes.value--
-      timerSeconds.value = 59
-    } else {
-      timerSeconds.value--
-    }
-  }, 1000)
-}
-
-function stopTimer() {
-  isRunning.value = false
-  if (timerInterval) clearInterval(timerInterval)
-  timerInterval = null
-}
-
-function markUncertain() {
-  uncertainCount.value++
-}
-
-onUnmounted(() => {
-  if (timerInterval) clearInterval(timerInterval)
+watch(() => pomodoroStore.isRunning, running => {
+  if (running && !timer) timer = window.setInterval(() => pomodoroStore.tick(), 1000)
+  if (!running && timer) {
+    window.clearInterval(timer)
+    timer = undefined
+  }
 })
+onBeforeUnmount(() => timer && window.clearInterval(timer))
+
+function startOrPause() {
+  if (!pomodoroStore.activeSessionId) pomodoroStore.startSession(estimate.value, subject.value)
+  else if (pomodoroStore.isRunning) pomodoroStore.pauseSession()
+  else pomodoroStore.isRunning = true
+}
+function finish() {
+  pomodoroStore.finishSession(actual.value, reason.value)
+}
 </script>
 
 <template>
-  <div class="time-task-cabin">
-    <Title size="large" color="app-blue">时间与学习自治舱</Title>
-    <p class="cabin-subtitle">5-6年级专属 - 像大人一样管理自己的生活</p>
-
-    <div class="cabin-grid">
-      <Card color="app-teal" type="title" class="timeline-card">
-        <template #title>
-          <Title size="middle" color="app-teal">考前复习时间流</Title>
-        </template>
-        <div class="timeline">
-          <div v-for="item in timelineItems" :key="item.date" class="timeline-item">
-            <div class="timeline-date">{{ item.date }}</div>
-            <div class="timeline-task" :class="item.type">{{ item.title }}</div>
-          </div>
-        </div>
-      </Card>
-
-      <Card color="app-green" type="title" class="pomodoro-card">
-        <template #title>
-          <Title size="middle" color="app-green">番茄工作法</Title>
-        </template>
-        <div class="pomodoro-content">
-          <div class="timer-ring">
-            <svg viewBox="0 0 200 200" class="timer-svg">
-              <circle cx="100" cy="100" r="90" fill="none" stroke="#e4e3d8" stroke-width="8" />
-              <circle
-                cx="100" cy="100" r="90" fill="none" stroke="#106e00" stroke-width="8"
-                :stroke-dasharray="2 * Math.PI * 90"
-                :stroke-dashoffset="2 * Math.PI * 90 * (1 - progressPercent / 100)"
-                stroke-linecap="round"
-                transform="rotate(-90 100 100)"
-              />
-            </svg>
-            <div class="timer-display">
-              <span class="timer-minutes">{{ String(timerMinutes).padStart(2, '0') }}</span>
-              <span class="timer-colon">:</span>
-              <span class="timer-seconds">{{ String(timerSeconds).padStart(2, '0') }}</span>
-            </div>
-          </div>
-          <div class="timer-actions">
-            <Button type="primary" @click="startTimer" v-if="!isRunning">启动专注</Button>
-            <Button type="dashed" danger @click="stopTimer" v-if="isRunning">暂停</Button>
-            <Button type="dashed" @click="markUncertain">
-              < name="icon-chat" /> 我有疑问
-            </Button>
-          </div>
-          <div v-if="uncertainCount > 0" class="uncertain-badge">
-            已标记 {{ uncertainCount }} 个不确定题目
-          </div>
-        </div>
-      </Card>
-
-      <Card color="app-orange" type="title" class="estimation-card">
-        <template #title>
-          <Title size="middle" color="app-orange">时间预估 vs 实际</Title>
-        </template>
-        <div class="estimation-content">
-          <div v-for="subj in subjectEstimations" :key="subj.subject" class="subject-bar">
-            <div class="subject-name">{{ subj.subject }}</div>
-            <div class="bar-group">
-              <div class="bar estimated" :style="{ width: subj.estimated * 2 + 'px' }">
-                预估 {{ subj.estimated }}分钟
-              </div>
-              <div class="bar actual" :style="{ width: subj.actual * 2 + 'px' }">
-                实际 {{ subj.actual }}分钟
-              </div>
-            </div>
-          </div>
-
-          <Card color="app-yellow" type="dashed">
-            <div class="drain-question">
-              <p>多花了15分钟，主要花在了哪个环节?</p>
-              <div class="drain-options">
-                <Button
-                  v-for="reason in drainReasons"
-                  :key="reason"
-                  :type="selectedDrainReason === reason ? 'primary' : 'default'"
-                  size="small"
-                  @click="selectedDrainReason = reason"
-                >
-                  {{ reason }}
-                </Button>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </Card>
-    </div>
+  <div class="page time-cabin">
+    <section class="page-hero"><div class="hero-card dark-panel"><span class="eyebrow">⏱️ 5-6 年级专属自治舱</span><h1>预估、执行、标记不确定</h1><p class="lead">冷静高信息密度界面，让高年级孩子练习考前复习规划和元认知复盘。</p></div><div class="panel dark-panel"><div class="card-title"><h2>番茄钟</h2><span class="tag">{{ remainingText }}</span></div><div class="timer">{{ remainingText }}</div><button class="btn secondary" @click="startOrPause">{{ !pomodoroStore.activeSessionId ? '启动' : pomodoroStore.isRunning ? '暂停' : '继续' }}</button><button class="btn ghost" :disabled="!pomodoroStore.activeSessionId" @click="pomodoroStore.markUncertain()">我有疑问 ?</button></div></section>
+    <section class="grid-3"><div class="panel dark-panel"><div class="card-title"><h2>复习时间流</h2><span class="tag">Calendar</span></div><div class="timeline"><div class="timeline-row"><b>周一</b><div class="timeline-bar"></div></div><div class="timeline-row"><b>周三</b><div class="timeline-bar" style="width:75%"></div></div><div class="timeline-row"><b>周五</b><div class="timeline-bar" style="width:60%"></div></div></div></div><div class="panel dark-panel"><div class="card-title"><h2>预估 vs 实际</h2><span class="tag">{{ diff >= 0 ? '+' : '' }}{{ diff }} 分钟</span></div><label>科目<select v-model="subject" class="input"><option>数学</option><option>语文</option><option>英语</option></select></label><label>预估用时<input v-model.number="estimate" class="input" type="number" /></label><label>实际用时<input v-model.number="actual" class="input" type="number" /></label><p class="lead">这道题比你预估{{ diff >= 0 ? '多' : '少' }}花 {{ Math.abs(diff) }} 分钟，主要花在哪个环节？</p><div class="stepper"><button class="btn ghost" @click="reason='reading'">读题</button><button class="btn ghost" @click="reason='calculation'">验算</button><button class="btn ghost" @click="reason='daydreaming'">神游</button></div><button class="btn secondary" :disabled="!pomodoroStore.activeSessionId" @click="finish">我写完了</button></div><div class="panel dark-panel"><div class="card-title"><h2>疑问题目标记</h2><span class="tag">{{ pomodoroStore.uncertainCount }} 个 ?</span></div><div class="kpi"><strong>{{ pomodoroStore.uncertainCount }}</strong><span>已同步到本次番茄钟，完成后可转入错题本</span></div><div class="list"><div v-for="session in pomodoroStore.sessions.slice(0,3)" :key="session.id" class="list-row"><span>{{ session.subject }} · 预估{{ session.estimatedMinutes }}分</span><span>{{ session.actualMinutes || '进行中' }}</span></div></div></div></section>
   </div>
 </template>
-
-<style scoped>
-.time-task-cabin {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  background: #f0f0f5;
-  min-height: 100vh;
-  padding: 0;
-}
-
-.cabin-subtitle {
-  color: #725d42;
-  font-size: 14px;
-}
-
-.cabin-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 16px;
-}
-
-.timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-}
-
-.timeline-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.timeline-date {
-  width: 60px;
-  padding: 6px;
-  background: #106e00;
-  color: white;
-  border-radius: 20px;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.timeline-task {
-  padding: 8px 12px;
-  background: #f7f3df;
-  border-radius: 12px;
-  font-weight: 500;
-}
-
-.timeline-task.exam {
-  border-left: 3px solid #fc736d;
-}
-
-.timeline-task.quiz {
-  border-left: 3px solid #82d5bb;
-}
-
-.pomodoro-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-}
-
-.timer-ring {
-  position: relative;
-  width: 180px;
-  height: 180px;
-}
-
-.timer-svg {
-  width: 100%;
-  height: 100%;
-}
-
-.timer-display {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  display: flex;
-  align-items: center;
-  font-size: 32px;
-  font-weight: 700;
-  color: #106e00;
-}
-
-.timer-colon {
-  margin: 0 2px;
-}
-
-.timer-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.uncertain-badge {
-  padding: 6px 12px;
-  background: #fbe270;
-  border-radius: 12px;
-  font-weight: 600;
-  color: #6e5e00;
-}
-
-.estimation-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.subject-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.subject-name {
-  width: 40px;
-  font-weight: 600;
-}
-
-.bar-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-}
-
-.bar {
-  height: 20px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  padding-left: 8px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.bar.estimated {
-  background: #82d5bb;
-  color: white;
-}
-
-.bar.actual {
-  background: #889df0;
-  color: white;
-}
-
-.drain-question {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.drain-options {
-  display: flex;
-  gap: 8px;
-}
-</style>
+<style scoped>.time-cabin{background:#101827;margin:-28px;padding:28px;min-height:calc(100vh - 76px);border-radius:0}.timer{font-size:64px;font-weight:950;text-align:center;margin:18px 0;color:#fff}.dark-panel .input{margin:8px 0 14px;background:#22324b;color:#fff;border-color:rgba(255,255,255,.18)}button:disabled{opacity:.5;cursor:not-allowed}</style>

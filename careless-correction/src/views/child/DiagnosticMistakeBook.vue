@@ -1,281 +1,60 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useMistakeStore, useUserStore } from '../../stores'
-import { Button, Card, Title, Divider, Input } from 'animal-island-vue'
+import { computed, ref } from 'vue'
+import { useMistakeStore } from '../../stores'
+import type { MistakeCategory } from '../../types'
 
 const mistakeStore = useMistakeStore()
-const userStore = useUserStore()
+const subject = ref('数学')
+const canRedo = ref<boolean | null>(null)
+const category = ref<MistakeCategory>('symbol_error')
 const knowledgePoint = ref('')
-
-const uploadedImage = ref<string | null>(null)
-const isCarelessness = ref<boolean | null>(null)
-const selectedCategory = ref<string | null>(null)
-const showDraftUpload = ref(false)
-const draftImageUrl = ref<string | null>(null)
-
-const mistakeCategories = [
-  { value: 'symbol_error', label: '看错符号', icon: '+ -> -', color: 'app-red' },
-  { value: 'unit_missing', label: '漏写单位', icon: '35 -> [ ]', color: 'app-orange' },
-  { value: 'misread_details', label: '读题遗漏', icon: 'skip', color: 'app-pink' },
-  { value: 'copying_error', label: '抄写错误', icon: 'copy', color: 'purple' },
-  { value: 'skipped_step', label: '跳步计算', icon: '1->3', color: 'app-blue' },
-  { value: 'rushing', label: '急于求成', icon: 'rush', color: 'app-teal' },
-  { value: 'lost_focus', label: '注意力涣散', icon: 'fog', color: 'brown' },
-  { value: 'messy_writing', label: '书写混乱', icon: 'mess', color: 'app-yellow' },
-  { value: 'format_error', label: '格式错误', icon: 'fmt', color: 'lime-green' },
-  { value: 'spelling_slip', label: '笔误/拼写', icon: 'typo', color: 'warm-peach-pink' },
-  { value: 'wild_guess', label: '盲目猜测', icon: '?', color: 'yellow-green' },
-  { value: 'something_else', label: '其他原因', icon: '...', color: 'default' },
+const imageName = ref('')
+const draftName = ref('')
+const diagnosisSaved = ref(false)
+const categories: { value: MistakeCategory; label: string; icon: string }[] = [
+  { value: 'symbol_error', label: '看错符号', icon: '+ → -' },
+  { value: 'unit_missing', label: '漏写单位', icon: '35 → [ ]' },
+  { value: 'misread_details', label: '读题遗漏', icon: '跳字' },
+  { value: 'copying_error', label: '抄写错误', icon: '抄错' },
+  { value: 'skipped_step', label: '跳步计算', icon: '1→3' },
+  { value: 'rushing', label: '急于求成', icon: '快' },
+  { value: 'lost_focus', label: '注意力涣散', icon: '雾' },
+  { value: 'messy_writing', label: '书写混乱', icon: '乱' },
+  { value: 'format_error', label: '格式错误', icon: '格' },
+  { value: 'spelling_slip', label: '笔误/拼写', icon: 'typo' },
+  { value: 'wild_guess', label: '盲目猜测', icon: '?' },
+  { value: 'something_else', label: '其他原因', icon: '…' },
 ]
+const reviewPlan = computed(() => canRedo.value ? ['今天：重新读题并圈符号', '3 天后：遮答案复做', '7 天后：同类题迁移'] : ['今天：标记知识点', '明天：补一个例题', '3 天后：再做同类题'])
 
-function handleUpload() {
-  uploadedImage.value = '/placeholder-mistake.png'
+function handleImage(event: Event, target: 'question' | 'draft') {
+  const input = event.target as HTMLInputElement
+  const name = input.files?.[0]?.name || ''
+  if (target === 'question') imageName.value = name
+  else draftName.value = name
 }
 
-function selectCarelessness(val: boolean) {
-  isCarelessness.value = val
-}
-
-function handleSave() {
-  if (!uploadedImage.value || isCarelessness.value === null) return
+function saveDiagnosis() {
+  if (!imageName.value || canRedo.value === null) return
   mistakeStore.addRecord({
-    id: Date.now().toString(),
-    subject: '数学',
-    imageUrl: uploadedImage.value,
-    isCarelessness: isCarelessness.value!,
-    category: selectedCategory.value as any,
-    createdAt: new Date().toISOString(),
-    reviewScheduledAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+    subject: subject.value,
+    imageUrl: imageName.value,
+    isCarelessness: canRedo.value,
+    category: canRedo.value ? category.value : undefined,
+    knowledgePoint: canRedo.value ? undefined : knowledgePoint.value || '待补充知识点',
   })
+  diagnosisSaved.value = true
 }
 </script>
 
 <template>
-  <div class="mistake-book">
-    <Title size="large" color="app-teal">黄金一问智能错题本</Title>
-
-    <Card type="dashed" class="upload-section">
-      <div class="upload-zone" @click="handleUpload">
-        < name="icon-camera" />
-        <p>拍照上传错题 - 拍下难缠的杂草</p>
-        <Button type="primary" v-if="!uploadedImage">拍照上传</Button>
-        <div v-if="uploadedImage" class="uploaded-preview">
-          <div class="preview-placeholder">错题图片已上传</div>
-          <Button type="dashed" size="small" @click="handleUpload">重新上传</Button>
-        </div>
-      </div>
-    </Card>
-
-    <Divider type="wave-yellow" />
-
-    <Card color="app-green" type="title" class="golden-question" v-if="uploadedImage">
-      <template #title>
-        <Title size="middle" color="app-green">黄金一问</Title>
-      </template>
-      <div class="question-content">
-        <p class="question-text">{{ userStore.profile.name }}能重新自己立刻做对这道题吗?</p>
-        <div class="answer-buttons">
-          <Button
-            :type="isCarelessness === true ? 'primary' : 'default'"
-            size="large"
-            @click="selectCarelessness(true)"
-          >
-            能! 只是粗心/执行功能错误
-          </Button>
-          <Button
-            :type="isCarelessness === false ? 'primary' : 'default'"
-            size="large"
-            @click="selectCarelessness(false)"
-          >
-            不能/不确定 - 知识漏洞
-          </Button>
-        </div>
-      </div>
-    </Card>
-
-    <Card v-if="isCarelessness === true" color="app-yellow" type="title">
-      <template #title>
-        <Title size="middle" color="app-yellow">选择粗心原因分类</Title>
-      </template>
-      <div class="category-grid">
-        <div
-          v-for="cat in mistakeCategories"
-          :key="cat.value"
-          class="category-item"
-          :class="{ selected: selectedCategory === cat.value }"
-          @click="selectedCategory = cat.value"
-        >
-          <div class="cat-icon">{{ cat.icon }}</div>
-          <span class="cat-label">{{ cat.label }}</span>
-        </div>
-      </div>
-    </Card>
-
-    <Card v-if="isCarelessness === false" color="app-blue" type="title">
-      <template #title>
-        <Title size="middle" color="app-blue">标记知识漏洞</Title>
-      </template>
-      <p>此题不计入粗心数据统计，将归入知识漏洞档案。</p>
-      <Input v-model="knowledgePoint" placeholder="输入知识点名称，如：两位数乘法" shadow />
-    </Card>
-
-    <Divider type="dashed-brown" />
-
-    <Card type="dashed" class="draft-section">
-      <div class="draft-header">
-        <Title size="small" color="app-red">草稿纸痕迹分析 (可选)</Title>
-        <Button type="text" @click="showDraftUpload = !showDraftUpload">
-          {{ showDraftUpload ? '隐藏' : '查看草稿纸' }}
-        </Button>
-      </div>
-      <div v-if="showDraftUpload" class="draft-upload">
-        <div class="draft-upload-zone" @click="draftImageUrl = '/placeholder-draft.png'">
-          <p>上传草稿纸照片，AI自动标出混乱区域</p>
-        </div>
-        <div v-if="draftImageUrl" class="draft-analysis">
-          <div class="heatmap-overlay">
-            <div class="chaos-zone" style="top: 30%; left: 20%; width: 40%; height: 25%;"></div>
-            <p>红色区域为书写混乱区域，数字抄写时对位歪了</p>
-          </div>
-        </div>
-      </div>
-    </Card>
-
-    <Button type="primary" block size="large" @click="handleSave" :disabled="!uploadedImage || isCarelessness === null">
-      保存到错题本
-    </Button>
+  <div class="page">
+    <section class="page-hero"><div class="hero-card"><span class="eyebrow">🔎 “黄金一问”智能错题本</span><h1>先问原因，再安排复习</h1><p class="lead">拍照录入错题后，先区分“会但做错”和“知识漏洞”，再分别进入粗心分类或知识点归档。</p></div><div class="panel"><div class="card-title"><h2>今日待复习</h2><span class="tag">{{ mistakeStore.todayReviewCount }} 题</span></div><div class="kpi"><strong>{{ Object.keys(mistakeStore.categoryStats).length }}</strong><span>已记录错误类型</span></div></div></section>
+    <section class="grid-2"><div class="panel"><label class="photo-drop">📸<strong>{{ imageName || '上传错题照片' }}</strong><span>自动裁切题目区域、识别学科和题干</span><input type="file" accept="image/*" @change="handleImage($event, 'question')" /></label><label class="photo-drop draft">📝<strong>{{ draftName || '上传草稿纸痕迹' }}</strong><span>红框提示对位歪斜、跳步或书写混乱区域</span><input type="file" accept="image/*" @change="handleImage($event, 'draft')" /></label></div><div class="panel"><div class="card-title"><h2>黄金一问</h2><span class="tag">{{ canRedo === null ? '待判断' : canRedo ? '粗心/执行功能' : '知识漏洞' }}</span></div><label>学科<select v-model="subject" class="input"><option>数学</option><option>语文</option><option>英语</option></select></label><h3>Leo 能重新自己立刻做对这道题吗？</h3><div class="stepper"><button class="btn" :class="{ secondary: canRedo === true }" @click="canRedo = true">能，只是粗心</button><button class="btn ghost" :class="{ secondary: canRedo === false }" @click="canRedo = false">不能/不确定</button></div><div v-if="canRedo" class="category-grid"><button v-for="cat in categories" :key="cat.value" class="category-card" :class="{ active: category === cat.value }" @click="category = cat.value"><b>{{ cat.icon }}</b><span>{{ cat.label }}</span></button></div><label v-else-if="canRedo === false">知识点归档<input v-model="knowledgePoint" class="input" placeholder="例如：小数乘法进位" /></label><button class="btn" :disabled="!imageName || canRedo === null" @click="saveDiagnosis">保存诊断并安排复习</button><p v-if="diagnosisSaved" class="note">已保存，并纳入 {{ canRedo ? '粗心数据分析' : '知识点复习计划' }}。</p></div></section>
+    <section class="panel"><div class="card-title"><h2>复习策略</h2><span class="tag">自动匹配</span></div><div class="grid-3"><div v-for="plan in reviewPlan" :key="plan" class="kpi"><strong>{{ plan.split('：')[0] }}</strong><span>{{ plan.split('：')[1] }}</span></div></div></section>
   </div>
 </template>
 
-
-
 <style scoped>
-.mistake-book {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.upload-zone {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 32px;
-  border: 2px dashed #9a835a;
-  border-radius: 16px;
-  text-align: center;
-  cursor: pointer;
-}
-
-.uploaded-preview {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.preview-placeholder {
-  width: 200px;
-  height: 150px;
-  background: #e4e3d8;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  color: #725d42;
-}
-
-.golden-question {
-  margin: 8px 0;
-}
-
-.question-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.question-text {
-  font-size: 18px;
-  font-weight: 700;
-  text-align: center;
-  color: #725d42;
-}
-
-.answer-buttons {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.category-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  padding: 8px;
-}
-
-.category-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 8px;
-  background: #f7f3df;
-  border: 2px solid #e4e3d8;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.category-item:hover {
-  transform: translateY(-2px);
-  background: #e4e3d8;
-}
-
-.category-item.selected {
-  border-color: #106e00;
-  background: #8ac68a;
-  color: white;
-}
-
-.cat-icon {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.cat-label {
-  font-size: 12px;
-}
-
-.draft-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.draft-upload-zone {
-  padding: 24px;
-  border: 2px dashed #fc736d;
-  border-radius: 12px;
-  text-align: center;
-  cursor: pointer;
-  color: #ba1a1a;
-}
-
-.heatmap-overlay {
-  position: relative;
-  padding: 16px;
-  background: #f7f3df;
-  border-radius: 8px;
-}
-
-.chaos-zone {
-  position: absolute;
-  background: rgba(252, 115, 109, 0.3);
-  border: 2px solid #fc736d;
-  border-radius: 4px;
-}
+.photo-drop{min-height:220px;border-radius:28px;background:linear-gradient(180deg,#eef8ff,#fff);border:2px dashed var(--blue);display:grid;place-items:center;text-align:center;font-size:58px;color:var(--muted);margin-bottom:16px;cursor:pointer}.photo-drop.draft{background:linear-gradient(180deg,#fff8df,#fff)}.photo-drop strong,.photo-drop span{display:block;font-size:18px}.photo-drop input{display:none}.category-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0}.category-card{padding:12px;border-radius:16px;background:#fff;border:1px solid var(--line);display:grid;gap:4px;color:var(--ink)}.category-card.active{background:#ecffd9;border-color:var(--primary);color:var(--primary)}.note{padding:14px;border-radius:18px;background:#fff8d9;color:#6e5e00}button:disabled{opacity:.5;cursor:not-allowed}
 </style>

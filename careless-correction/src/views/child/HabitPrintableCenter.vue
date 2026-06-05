@@ -1,245 +1,43 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { Button, Card, Title, Divider } from 'animal-island-vue'
-import { useRouter } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useTaskStore, useUserStore } from '../../stores'
 
-const router = useRouter()
+const taskStore = useTaskStore()
+const userStore = useUserStore()
+const parentChecked = ref(false)
+const sent = ref(false)
+const scanResult = ref('')
+const progressPercent = computed(() => Math.round((taskStore.weeklyProgress / Math.max(taskStore.todayTasks.length, 1)) * 100))
 
-const currentStepIndex = ref(0)
-const parentReflectionYes = ref(false)
-const weeklyProgress = ref(33)
-
-const sopSteps = [
-  { order: 1, instruction: '动笔前，用手指指着题目，逐字读题' },
-  { order: 2, instruction: '用铅笔圈出每道大题的题号' },
-  { order: 3, instruction: '圈完后抬头看一圈，确认没有遗漏' },
-]
-
-function handlePrint() {
-  router.push('/printable')
+function sendPrint() {
+  sent.value = true
+  window.setTimeout(() => window.print(), 150)
 }
 
-function handleScanUpload() {
-  alert('请拍照上传完成的纸质打卡单')
+function scanChecklist(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.files?.length) return
+  scanResult.value = `已识别 ${input.files[0].name}：5 个勾选，建议继续保持“指读圈号”。`
 }
-
-function nextStep() {
-  if (currentStepIndex.value < sopSteps.length - 1) {
-    currentStepIndex.value++
-  }
-}
-
-function prevStep() {
-  if (currentStepIndex.value > 0) {
-    currentStepIndex.value--
-  }
-}
-
-const currentStep = computed(() => sopSteps[currentStepIndex.value])
 </script>
 
 <template>
-  <div class="habit-center">
-    <div class="progress-section">
-      <Card color="app-green" type="title">
-        <template #title>
-          <Title size="small" color="app-green">本周习惯养成进度</Title>
-        </template>
-        <div class="vine-progress">
-          <div class="vine-bar">
-            <div class="vine-fill" :style="{ width: weeklyProgress + '%' }"></div>
-          </div>
-          <span class="progress-text">{{ weeklyProgress }}% - 继续加油!</span>
-        </div>
-      </Card>
-    </div>
-
-    <Divider type="wave-yellow" />
-
-    <div class="sop-section">
-      <div class="sop-grid">
-        <div class="sop-main">
-          <Card color="app-teal" type="title">
-            <template #title>
-              <Title size="middle" color="app-teal">习惯标准操作程序 (SOP)</Title>
-            </template>
-            <div class="step-display">
-              <div class="step-number">第 {{ currentStep.order }} 步</div>
-              <p class="step-instruction">{{ currentStep.instruction }}</p>
-              <div class="step-nav">
-                <Button type="dashed" @click="prevStep" :disabled="currentStepIndex === 0">上一步</Button>
-                <Button type="primary" @click="nextStep" :disabled="currentStepIndex === sopSteps.length - 1">下一步</Button>
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        <div class="sop-parent-note">
-          <Card color="warm-peach-pink">
-            <div class="sticky-note-card">
-              <Title size="small" color="warm-peach-pink">家长自查</Title>
-              <p>今天您是否克制了对孩子的催促和代劳?</p>
-              <div class="reflection-buttons">
-                <Button type="primary" @click="parentReflectionYes = true">
-                  是，我做到了
-                </Button>
-                <Button type="primary" danger @click="parentReflectionYes = false">
-                  还需要改进
-                </Button>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </div>
-    </div>
-
-    <Divider type="wave-yellow" />
-
-    <div class="print-section">
-      <Card color="app-yellow" type="title">
-        <template #title>
-          <Title size="middle" color="app-yellow">打印工具箱</Title>
-        </template>
-        <div class="print-grid">
-          <div class="print-preview">
-            <div class="a4-preview">
-              <div class="a4-header">每日习惯打卡单</div>
-              <div class="a4-body">
-                <div class="a4-row">周一 ○ 周二 ○ 周三 ○</div>
-                <div class="a4-row">周四 ○ 周五 ○ 周六 ○ 周日 ○</div>
-              </div>
-            </div>
-          </div>
-          <div class="print-actions">
-            <Button type="primary" block @click="handlePrint">
-              < name="icon-diy" /> 发送打印
-            </Button>
-            <Button type="dashed" block @click="handleScanUpload">
-              <Icon name="icon-camera" /> 拍照回传核销
-            </Button>
-          </div>
-        </div>
-      </Card>
-    </div>
+  <div class="page habit-page">
+    <section class="page-hero">
+      <div class="hero-card"><span class="eyebrow">✅ 每日微习惯打卡与物理生成器</span><h1>把屏幕上的习惯带回纸面</h1><p class="lead">顶部展示本周习惯进度，中部用 SOP 步骤解释规范，底部提供 A4 打印、拍照回传和家长自查红线。</p></div>
+      <div class="panel"><div class="card-title"><h2>本周进度 {{ taskStore.weeklyProgress }}/{{ taskStore.todayTasks.length }}</h2><span class="tag">第 {{ taskStore.currentWeekHabit.weekNumber }} 周</span></div><div class="progress"><span :style="{ width: `${progressPercent}%` }"></span></div><p class="lead">主线习惯：{{ taskStore.currentWeekHabit.title }}</p></div>
+    </section>
+    <section class="grid-3">
+      <div v-for="step in taskStore.currentWeekHabit.steps" :key="step.order" class="step"><b>{{ step.order }}</b><h3>{{ step.instruction }}</h3><p class="muted">完成后在纸质打卡单对应格子打勾。</p></div>
+    </section>
+    <section class="grid-2">
+      <div class="panel"><div class="card-title"><h2>打印工具箱</h2><span class="tag">A4 预览</span></div><div class="preview-paper"><h3>{{ userStore.profile.name }} 的本周小树打卡单</h3><div class="list"><div v-for="day in ['周一','周二','周三','周四','周五']" :key="day" class="list-row"><span>{{ day }} 指读圈号</span><span>□ □ □</span></div></div></div><button class="btn" @click="sendPrint">发送打印</button><p v-if="sent" class="lead">已打开浏览器打印；实际部署可接入 AirPrint / 局域网打印服务。</p></div>
+      <div class="panel"><div class="card-title"><h2>拍照回传核销</h2><span class="tag">本地模拟 AI 扫描</span></div><label class="upload-box">📷<strong>上传周末打卡单照片</strong><span>选择图片后生成识别结果</span><input type="file" accept="image/*" @change="scanChecklist" /></label><p v-if="scanResult" class="note">{{ scanResult }}</p><label class="list-row"><span>今天您是否克制催促和代劳？</span><input v-model="parentChecked" type="checkbox" /></label><p v-if="parentChecked" class="note">您的教育边界感又前进了一步。</p></div>
+    </section>
   </div>
 </template>
 
-
-
 <style scoped>
-.habit-center {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.vine-progress {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 0;
-}
-
-.vine-bar {
-  flex: 1;
-  height: 16px;
-  background: #e4e3d8;
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-.vine-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #8ac68a, #3d5a1a);
-  border-radius: 16px;
-  transition: width 0.5s;
-}
-
-.progress-text {
-  font-weight: 700;
-  color: #106e00;
-}
-
-.sop-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 16px;
-}
-
-.step-display {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.step-number {
-  font-weight: 700;
-  color: #00677e;
-  font-size: 18px;
-}
-
-.step-instruction {
-  font-size: 16px;
-  color: #725d42;
-  padding: 12px;
-  background: #f7f3df;
-  border-radius: 12px;
-}
-
-.step-nav {
-  display: flex;
-  gap: 8px;
-}
-
-.sticky-note-card {
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.reflection-buttons {
-  display: flex;
-  gap: 8px;
-}
-
-.print-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  padding: 8px 0;
-}
-
-.a4-preview {
-  width: 100%;
-  max-width: 200px;
-  padding: 12px;
-  background: white;
-  border: 2px solid #9a835a;
-  border-radius: 4px;
-  font-size: 12px;
-}
-
-.a4-header {
-  text-align: center;
-  font-weight: 700;
-  margin-bottom: 8px;
-  border-bottom: 1px dashed #9a835a;
-}
-
-.a4-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.a4-row {
-  padding: 2px 0;
-}
-
-.print-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+.upload-box{min-height:220px;border:2px dashed var(--line);border-radius:24px;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:46px;padding:24px;cursor:pointer}.upload-box strong,.upload-box span{display:block;font-size:18px}.upload-box input{display:none}.note{padding:14px;border-radius:18px;background:#fff8d9;color:#6e5e00}
+@media print { .hero-card, .upload-box, .btn { display: none !important; } }
 </style>
