@@ -22,7 +22,7 @@ const routes = [
   },
   {
     path: '/mistake',
-    name: 'MistakeBook',
+    name: 'TreasureBank',
     component: () => import('../views/child/DiagnosticMistakeBook.vue')
   },
   {
@@ -51,6 +51,11 @@ const routes = [
     component: () => import('../views/parent/ParentalControlCenter.vue')
   },
   {
+    path: '/parent/habit-assign',
+    name: 'HabitAssign',
+    component: () => import('../views/parent/HabitAssignPage.vue')
+  },
+  {
     path: '/parent/lab',
     name: 'EvidenceLab',
     component: () => import('../views/parent/EvidenceBasedLab.vue')
@@ -64,6 +69,11 @@ const routes = [
     path: '/printable',
     name: 'PrintableChecklist',
     component: () => import('../views/child/A4PrintableChecklist.vue')
+  },
+  {
+    path: '/guide',
+    name: 'UsageGuide',
+    component: () => import('../views/child/UsageGuide.vue')
   }
 ]
 

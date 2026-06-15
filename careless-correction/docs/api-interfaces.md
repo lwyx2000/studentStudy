@@ -1,6 +1,8 @@
 # 全小学阶段儿童粗心矫正系统 - 后端接口文档
 
-> 版本: v1.0 | 基线日期: 2026-06-05
+> 版本: v1.0 | 基线日期: 2026-06-05 | 数据库: MySQL 8.0+
+> 数据库命名规范：表名 `biz_业务名`，主键 `pk_业务名`，外键 `f_关联业务名`
+> 例：表 `biz_users` 主键 `pk_users`，表 `biz_assessments` 外键 `f_users` → `biz_users.pk_users`
 
 ---
 
@@ -849,3 +851,505 @@ GET /api/v1/articles/suggested/:userId
 POST /api/v1/articles/:articleId/bookmark
 DELETE /api/v1/articles/:articleId/bookmark
 ```
+
+---
+
+## 14. 藏宝库（题库）模块
+
+### 14.1 获取题目列表
+
+```
+GET /api/v1/questions/:userId?page=1&pageSize=20&subject=math&resolved=false&source=manual&sort=createdAt&order=desc
+```
+
+查询参数:
+- `subject`: 科目过滤(math/chinese/english/science/other)
+- `resolved`: 是否已解决(true/false)
+- `source`: 来源过滤(manual/photo/import)
+- `sort`: 排序字段(createdAt/updatedAt/difficulty/reviewCount)
+- `order`: 排序方向(asc/desc)
+
+响应:
+```json
+{
+  "data": {
+    "total": 45,
+    "page": 1,
+    "pageSize": 20,
+    "list": [
+      {
+        "id": "q_xxx",
+        "subject": "math",
+        "type": "calculation",
+        "content": "计算：3.25 × 4 + 0.5 =",
+        "answer": "13.5",
+        "grade": 3,
+        "chapter": "第3单元 小数乘法",
+        "knowledgePoints": ["小数乘法", "混合运算"],
+        "difficulty": 2,
+        "tags": ["易错"],
+        "isCarelessness": true,
+        "mistakeCategory": "symbol_error",
+        "reviewCount": 1,
+        "resolved": false,
+        "source": "manual",
+        "createdAt": "2026-06-01T10:00:00Z",
+        "updatedAt": "2026-06-01T10:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+### 14.2 手工创建题目
+
+```
+POST /api/v1/questions
+```
+
+请求:
+```json
+{
+  "subject": "math",
+  "type": "calculation",
+  "content": "计算：3.25 × 4 + 0.5 =",
+  "answer": "13.5",
+  "grade": 3,
+  "chapter": "第3单元",
+  "knowledgePoints": ["小数乘法", "混合运算"],
+  "difficulty": 2,
+  "tags": ["易错"],
+  "isCarelessness": true,
+  "mistakeCategory": "symbol_error"
+}
+```
+
+响应:
+```json
+{
+  "data": {
+    "id": "q_xxx",
+    "createdAt": "2026-06-05T10:00:00Z"
+  }
+}
+```
+
+### 14.3 更新题目
+
+```
+PUT /api/v1/questions/:questionId
+```
+
+请求: 同创建题目（Partial，仅传需要更新的字段）
+
+响应: 更新后的完整题目数据
+
+### 14.4 删除题目
+
+```
+DELETE /api/v1/questions/:questionId
+```
+
+响应: `{ "data": { "deleted": true } }`
+
+### 14.5 标记题目已解决
+
+```
+POST /api/v1/questions/:questionId/resolve
+```
+
+响应: `{ "data": { "resolved": true } }`
+
+### 14.6 增加复习次数
+
+```
+POST /api/v1/questions/:questionId/review
+```
+
+响应: `{ "data": { "reviewCount": 3 } }`
+
+### 14.7 获取题库统计概览
+
+```
+GET /api/v1/questions/stats/:userId
+```
+
+响应:
+```json
+{
+  "data": {
+    "totalCount": 45,
+    "unresolvedCount": 30,
+    "todayAddedCount": 3,
+    "bySubject": { "math": 20, "chinese": 15, "english": 8, "science": 2 },
+    "byCategory": { "symbol_error": 8, "misread_details": 5, "rushing": 3 },
+    "byDifficulty": { "1": 5, "2": 12, "3": 15, "4": 8, "5": 5 }
+  }
+}
+```
+
+### 14.8 AI智能选题
+
+```
+POST /api/v1/questions/ai-recommend/:userId
+```
+
+请求:
+```json
+{
+  "maxCount": 10,
+  "subject": "math",
+  "difficultyMin": 2
+}
+```
+
+响应:
+```json
+{
+  "data": {
+    "recommendedIds": ["q_xxx", "q_yyy", "..."],
+    "reason": "优先选择复习次数少、难度高、且未解决的题目"
+  }
+}
+```
+
+### 14.9 生成打印页面
+
+```
+POST /api/v1/questions/print
+```
+
+请求:
+```json
+{
+  "questionIds": ["q_xxx", "q_yyy"],
+  "mode": "manual",
+  "title": "错题打印",
+  "includeAnswer": true
+}
+```
+
+响应:
+```json
+{
+  "data": {
+    "pdfUrl": "/prints/questions_print_xxx.pdf",
+    "questionCount": 2,
+    "generatedAt": "2026-06-05T10:00:00Z"
+  }
+}
+```
+
+### 14.10 导入外部题库
+
+```
+POST /api/v1/questions/import
+```
+
+请求: multipart/form-data, 字段 `file` (JSON文件)
+
+响应:
+```json
+{
+  "data": {
+    "importId": "imp_xxx",
+    "fileName": "math_questions.json",
+    "totalCount": 50,
+    "importedCount": 45,
+    "failedCount": 5,
+    "status": "partial",
+    "errors": [
+      "第3题: content(题目正文)为必填项",
+      "第7题: subject 不合法"
+    ]
+  }
+}
+```
+
+**导入JSON格式规范 v1.0:**
+```json
+{
+  "version": "1.0",
+  "exportedAt": "2026-06-05T10:00:00Z",
+  "schoolInfo": { "name": "XX小学", "grade": 3 },
+  "questions": [
+    {
+      "subject": "math",
+      "type": "calculation",
+      "content": "计算：3.25 × 4 =",
+      "answer": "13",
+      "grade": 3,
+      "chapter": "第3单元",
+      "knowledgePoints": ["小数乘法"],
+      "difficulty": 2,
+      "tags": ["易错"]
+    }
+  ]
+}
+```
+
+**校验规则:**
+- `version` 必须为 `"1.0"`
+- `questions[].subject` 必填，且为 math/chinese/english/science/other 之一
+- `questions[].type` 必填，且为 choice/fill/calculation/composition/other 之一
+- `questions[].content` 必填，不能为空白
+- `questions[].grade` 选填，缺省取 schoolInfo.grade 或 3
+- `questions[].difficulty` 选填，范围1-5，缺省为3
+- 其余字段均为选填
+
+### 14.11 导出题库
+
+```
+POST /api/v1/questions/export
+```
+
+请求:
+```json
+{
+  "questionIds": ["q_xxx", "q_yyy"],
+  "format": "json"
+}
+```
+
+响应: 以标准 v1.0 JSON 格式返回题库数据（Content-Type: application/json，Content-Disposition: attachment）
+
+### 14.12 获取导入历史
+
+```
+GET /api/v1/questions/imports/:userId?page=1&pageSize=10
+```
+
+响应:
+```json
+{
+  "data": {
+    "total": 3,
+    "list": [
+      {
+        "id": "imp_xxx",
+        "fileName": "math_questions.json",
+        "totalCount": 50,
+        "importedCount": 50,
+        "failedCount": 0,
+        "status": "success",
+        "importedAt": "2026-06-05T10:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+### 14.13 获取薄弱环节分析数据
+
+```
+GET /api/v1/questions/weakness/:userId
+```
+
+响应:
+```json
+{
+  "data": {
+    "bySubject": [
+      { "subject": "数学", "count": 20, "color": "#f87171" },
+      { "subject": "语文", "count": 15, "color": "#60a5fa" }
+    ],
+    "byCategory": [
+      { "category": "看错符号", "count": 8 },
+      { "category": "读题遗漏", "count": 5 }
+    ],
+    "byKnowledgePoint": [
+      { "point": "小数乘法", "count": 6 },
+      { "point": "分数比较", "count": 4 }
+    ],
+    "byDifficulty": [
+      { "level": 1, "label": "★", "count": 5 },
+      { "level": 2, "label": "★★", "count": 12 },
+      { "level": 3, "label": "★★★", "count": 15 },
+      { "level": 4, "label": "★★★★", "count": 8 },
+      { "level": 5, "label": "★★★★★", "count": 5 }
+    ]
+  }
+}
+```
+
+---
+
+## 15. 使用说明模块
+
+### 15.1 获取使用说明内容
+
+```
+GET /api/v1/guide
+```
+
+响应:
+```json
+{
+  "data": {
+    "pages": [
+      {
+        "icon": "🌳",
+        "title": "协同仪表盘",
+        "path": "/dashboard",
+        "purpose": "系统的核心入口页面，展示今日最需要关注的任务与即时反馈。",
+        "usage": ["低年级大卡片单任务聚焦模式", "高年级数据面板模式", "点击任务卡片完成可获得阳光值"]
+      }
+    ],
+    "commonOps": [
+      { "icon": "☀️", "title": "阳光值", "desc": "完成任务、上传照片、解锁勋章均可获得" },
+      { "icon": "🌱", "title": "成长树", "desc": "侧栏展示，随Level变化形态" },
+      { "icon": "🖨️", "title": "打印", "desc": "习惯打卡单和错题均支持A4打印" }
+    ]
+  }
+}
+```
+
+> 前端使用说明页面为纯静态页面，数据直接写在前端，此接口为可选的后端化方案。
+
+---
+
+## 16. 习惯布置模块
+
+> 家长为孩子布置每周核心习惯，包含执行步骤SOP、奖励阳光值、周数等。孩子端自动同步活跃习惯。
+
+### 16.1 获取孩子的习惯列表
+
+```
+GET /api/v1/habits/:childId?active=true
+```
+
+查询参数:
+- `active`: 是否仅活跃习惯(true/false)，缺省返回全部
+
+响应:
+```json
+{
+  "data": {
+    "list": [
+      {
+        "id": "ha_xxx",
+        "childId": "u_child",
+        "parentId": "u_parent",
+        "title": "指读圈号",
+        "description": "用手指指着题目逐字阅读，圈出关键词",
+        "icon": "✅",
+        "rewardPoints": 10,
+        "weekNumber": 3,
+        "steps": [
+          { "order": 1, "instruction": "把作业本翻开到今天作业页" },
+          { "order": 2, "instruction": "用手指指着题目逐字读" },
+          { "order": 3, "instruction": "圈出关键词" }
+        ],
+        "assignedAt": "2026-06-05T10:00:00Z",
+        "active": true
+      }
+    ]
+  }
+}
+```
+
+### 16.2 布置新习惯
+
+```
+POST /api/v1/habits
+```
+
+请求:
+```json
+{
+  "childId": "u_child",
+  "parentId": "u_parent",
+  "title": "指读圈号",
+  "description": "用手指指着题目逐字阅读，圈出关键词",
+  "icon": "✅",
+  "rewardPoints": 10,
+  "weekNumber": 3,
+  "steps": [
+    { "order": 1, "instruction": "把作业本翻开到今天作业页" },
+    { "order": 2, "instruction": "用手指指着题目逐字读" },
+    { "order": 3, "instruction": "圈出关键词" }
+  ]
+}
+```
+
+响应:
+```json
+{
+  "data": {
+    "id": "ha_xxx",
+    "assignedAt": "2026-06-05T10:00:00Z",
+    "active": true
+  }
+}
+```
+
+### 16.3 更新习惯
+
+```
+PUT /api/v1/habits/:habitId
+```
+
+请求: 同布置新习惯（Partial，仅传需要更新的字段）
+
+响应: 更新后的完整习惯数据
+
+### 16.4 停用习惯
+
+```
+POST /api/v1/habits/:habitId/deactivate
+```
+
+响应:
+```json
+{
+  "data": {
+    "id": "ha_xxx",
+    "active": false
+  }
+}
+```
+
+### 16.5 获取习惯执行情况统计
+
+```
+GET /api/v1/habits/:habitId/stats?days=7
+```
+
+查询参数:
+- `days`: 统计最近N天，缺省7
+
+响应:
+```json
+{
+  "data": {
+    "habitId": "ha_xxx",
+    "title": "指读圈号",
+    "totalDays": 7,
+    "completedDays": 5,
+    "completionRate": 71.4,
+    "streakDays": 3
+  }
+}
+```
+
+---
+
+## 附录：接口模块与数据库表映射
+
+| 接口模块 | 主要操作表 | 主键 | 关键外键 |
+|---------|-----------|------|---------|
+| 2.认证 | biz_users | pk_users | f_users(自关联parent) |
+| 3.评估 | biz_assessments | pk_assessments | f_users |
+| 4.任务 | biz_tasks, biz_habit_sops, biz_sop_steps, biz_task_weekly_progress | pk_tasks / pk_habit_sops / pk_sop_steps / pk_task_weekly_progress | f_users, f_habit_sops |
+| 5.错题本 | biz_mistake_records, biz_mistake_reviews, biz_draft_papers | pk_mistake_records / pk_mistake_reviews / pk_draft_papers | f_users, f_mistake_records |
+| 6.物品追踪 | biz_item_loss_records, biz_before_after_photos | pk_item_loss_records / pk_before_after_photos | f_users |
+| 7.成长档案 | biz_growth_snapshots, biz_diagnostic_alerts, biz_growth_reports | pk_growth_snapshots / pk_diagnostic_alerts / pk_growth_reports | f_users |
+| 8.番茄钟 | biz_pomodoro_sessions, biz_pomodoro_uncertain_marks | pk_pomodoro_sessions / pk_pomodoro_uncertain_marks | f_users, f_pomodoro_sessions |
+| 9.契约勋章 | biz_covenants, biz_covenant_signatures, biz_badges, biz_badge_unlocks | pk_covenants / pk_covenant_signatures / pk_badges / pk_badge_unlocks | f_users, f_badges, f_covenants |
+| 10.打印核销 | biz_tasks | - | - |
+| 11.家长控制 | biz_parent_settings | pk_parent_settings | f_users |
+| 12.社区花园 | biz_community_posts, biz_post_replies, biz_shared_covenants | pk_community_posts / pk_post_replies / pk_shared_covenants | f_users, f_community_posts, f_covenants |
+| 13.循证资源 | biz_articles, biz_article_bookmarks | pk_articles / pk_article_bookmarks | f_users, f_articles |
+| 14.藏宝库 | biz_question_items, biz_question_bank_imports, biz_question_print_jobs | pk_question_items / pk_question_bank_imports / pk_question_print_jobs | f_users, f_question_bank_imports |
+| 15.使用说明 | (无数据库表，前端静态) | - | - |
+| 16.习惯布置 | biz_habit_assignments, biz_habit_sop_steps | pk_habit_assignments / pk_habit_sop_steps | f_users(child), f_users(parent) |

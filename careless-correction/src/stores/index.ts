@@ -9,6 +9,7 @@ import type {
   FamilyCovenant,
   GrowthDataPoint,
   HabitSOP,
+  HabitAssignment,
   ItemLossRecord,
   MistakeCategory,
   MistakeRecord,
@@ -16,6 +17,13 @@ import type {
   PomodoroSession,
   TaskItem,
   UserProfile,
+  QuestionItem,
+  QuestionBankImport,
+  QuestionBankExportFormat,
+  QuestionBankExportItem,
+  QuestionSubject,
+  QuestionType,
+  SOPStep,
 } from '../types'
 
 function loadState<T>(key: string, fallback: T): T {
@@ -118,8 +126,9 @@ const seededTasks: TaskItem[] = [
 ]
 
 export const useTaskStore = defineStore('task', () => {
-  const saved = loadState('cc-task', { todayTasks: seededTasks })
+  const saved = loadState('cc-task', { todayTasks: seededTasks, habitAssignments: [] as HabitAssignment[] })
   const todayTasks = ref<TaskItem[]>(saved.todayTasks?.length ? saved.todayTasks : seededTasks)
+  const habitAssignments = ref<HabitAssignment[]>(saved.habitAssignments || [])
   const currentWeekHabit = ref<HabitSOP>({
     id: 'week-3-read-circle',
     title: '读题圈号 SOP',
@@ -131,8 +140,9 @@ export const useTaskStore = defineStore('task', () => {
     ],
   })
   const weeklyProgress = computed(() => todayTasks.value.filter(task => task.status === 'completed').length)
+  const activeHabits = computed(() => habitAssignments.value.filter(h => h.active))
 
-  watch(() => ({ todayTasks: todayTasks.value }), value => persistState('cc-task', value), { deep: true })
+  watch(() => ({ todayTasks: todayTasks.value, habitAssignments: habitAssignments.value }), value => persistState('cc-task', value), { deep: true })
 
   function completeTask(id: string) {
     const task = todayTasks.value.find(t => t.id === id)
@@ -149,7 +159,62 @@ export const useTaskStore = defineStore('task', () => {
     todayTasks.value = seededTasks.map(task => ({ ...task, status: 'pending' }))
   }
 
-  return { todayTasks, currentWeekHabit, weeklyProgress, completeTask, setTodayTasks, resetTodayTasks }
+  async function fetchHabits(childId: string) {
+    try {
+      const { api } = await import('../utils/api')
+      const habits = await api.habits.list(childId)
+      habitAssignments.value = habits
+      const active = habits.filter(h => h.active)
+      if (active.length > 0) {
+        const latest = active[0]
+        currentWeekHabit.value = {
+          id: latest.id,
+          title: latest.title,
+          weekNumber: latest.weekNumber,
+          steps: latest.steps,
+        }
+        const habitTasks: TaskItem[] = active.map(h => ({
+          id: h.id,
+          title: h.title,
+          description: h.description,
+          type: 'habit' as const,
+          status: 'pending' as const,
+          rewardPoints: h.rewardPoints,
+          icon: h.icon,
+        }))
+        const extraTasks = seededTasks.filter(t => t.type !== 'habit')
+        todayTasks.value = [...habitTasks, ...extraTasks]
+      }
+    } catch {
+      // API不可用时保持本地缓存数据
+    }
+  }
+
+  function addHabitAssignment(data: Omit<HabitAssignment, 'id' | 'assignedAt'>) {
+    const habit: HabitAssignment = { ...data, id: `ha-${Date.now()}`, assignedAt: new Date().toISOString() }
+    habitAssignments.value.unshift(habit)
+    if (habit.active) {
+      todayTasks.value.unshift({
+        id: habit.id,
+        title: habit.title,
+        description: habit.description,
+        type: 'habit',
+        status: 'pending',
+        rewardPoints: habit.rewardPoints,
+        icon: habit.icon,
+      })
+      currentWeekHabit.value = { id: habit.id, title: habit.title, weekNumber: habit.weekNumber, steps: habit.steps }
+    }
+    return habit
+  }
+
+  function deactivateHabit(id: string) {
+    const habit = habitAssignments.value.find(h => h.id === id)
+    if (habit) habit.active = false
+    todayTasks.value = todayTasks.value.filter(t => t.id !== id)
+  }
+
+  return { todayTasks, habitAssignments, currentWeekHabit, weeklyProgress, activeHabits, completeTask, setTodayTasks, resetTodayTasks, fetchHabits, addHabitAssignment, deactivateHabit }
 })
 
 const categoryLabels: Record<MistakeCategory, string> = {
@@ -347,4 +412,229 @@ export const useParentStore = defineStore('parent', () => {
   }
 
   return { settings, discussionPosts, articles, updateSettings, createPost }
+})
+
+// ==================
+// 藏宝库（题库）Store
+// ==================
+
+const categoryLabelsBank: Record<string, string> = {
+  symbol_error: '看错符号', unit_missing: '漏写单位', misread_details: '读题遗漏',
+  copying_error: '抄写错误', skipped_step: '跳步计算', rushing: '急于求成',
+  lost_focus: '注意力涣散', messy_writing: '书写混乱', format_error: '格式错误',
+  spelling_slip: '笔误/拼写', wild_guess: '盲目猜测', something_else: '其他原因',
+}
+
+const subjectLabels: Record<string, string> = {
+  math: '数学', chinese: '语文', english: '英语', science: '科学', other: '其他',
+}
+
+const subjectColors: Record<string, string> = {
+  math: '#f87171', chinese: '#60a5fa', english: '#34d399', science: '#fbbf24', other: '#c4b5fd',
+}
+
+const difficultyLabels = ['', '★ 简单', '★★ 较易', '★★★ 中等', '★★★★ 较难', '★★★★★ 困难']
+
+const seededQuestions: QuestionItem[] = [
+  {
+    id: 'q-1', subject: 'math', type: 'calculation', content: '计算：3.25 × 4 + 0.5 =',
+    answer: '13.5', grade: 3, chapter: '第3单元 小数乘法', knowledgePoints: ['小数乘法', '混合运算'],
+    difficulty: 2, tags: ['易错'], isCarelessness: true, mistakeCategory: 'symbol_error',
+    reviewCount: 1, resolved: false, source: 'manual',
+    createdAt: daysFromNow(-5), updatedAt: daysFromNow(-5),
+  },
+  {
+    id: 'q-2', subject: 'chinese', type: 'fill', content: '把下列词语补充完整：一( )千里，( )往直前',
+    answer: '日；义', grade: 3, chapter: '第5单元 成语积累', knowledgePoints: ['成语', '字义辨析'],
+    difficulty: 3, tags: [], isCarelessness: false,
+    reviewCount: 0, resolved: false, source: 'manual',
+    createdAt: daysFromNow(-3), updatedAt: daysFromNow(-3),
+  },
+  {
+    id: 'q-3', subject: 'math', type: 'choice', content: '下列分数中，最小的是：A. 3/4  B. 5/6  C. 2/3  D. 7/8',
+    answer: 'C', grade: 4, chapter: '第4单元 分数比较', knowledgePoints: ['分数大小比较', '通分'],
+    difficulty: 2, tags: ['易错', '常考'], isCarelessness: true, mistakeCategory: 'misread_details',
+    reviewCount: 2, resolved: false, source: 'manual',
+    createdAt: daysFromNow(-7), updatedAt: daysFromNow(-2),
+  },
+]
+
+export const useQuestionBankStore = defineStore('questionBank', () => {
+  const saved = loadState('cc-qbank', { questions: seededQuestions, imports: [] as QuestionBankImport[] })
+  const questions = ref<QuestionItem[]>(saved.questions?.length ? saved.questions : seededQuestions)
+  const imports = ref<QuestionBankImport[]>(saved.imports || [])
+  const selectedIds = ref<Set<string>>(new Set())
+  const printPreviewVisible = ref(false)
+  const printIncludeAnswer = ref(false)
+
+  watch(
+    () => ({ questions: questions.value, imports: imports.value }),
+    value => persistState('cc-qbank', value),
+    { deep: true },
+  )
+
+  // 统计 computed
+  const totalCount = computed(() => questions.value.length)
+  const unresolvedCount = computed(() => questions.value.filter(q => !q.resolved).length)
+  const todayAddedCount = computed(() => {
+    const today = new Date().toDateString()
+    return questions.value.filter(q => new Date(q.createdAt).toDateString() === today).length
+  })
+
+  // 薄弱点图表数据
+  const weaknessChartData = computed(() => {
+    const bySubjectMap: Record<string, number> = {}
+    const byCategoryMap: Record<string, number> = {}
+    const byKPMap: Record<string, number> = {}
+    const byDiffMap: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+
+    for (const q of questions.value.filter(x => !x.resolved)) {
+      const subLabel = subjectLabels[q.subject] || q.subject
+      bySubjectMap[subLabel] = (bySubjectMap[subLabel] || 0) + 1
+      if (q.mistakeCategory) {
+        const catLabel = categoryLabelsBank[q.mistakeCategory] || q.mistakeCategory
+        byCategoryMap[catLabel] = (byCategoryMap[catLabel] || 0) + 1
+      }
+      for (const kp of q.knowledgePoints) {
+        byKPMap[kp] = (byKPMap[kp] || 0) + 1
+      }
+      byDiffMap[q.difficulty] = (byDiffMap[q.difficulty] || 0) + 1
+    }
+
+    const bySubject = Object.entries(bySubjectMap).map(([subject, count]) => ({
+      subject, count,
+      color: subjectColors[Object.keys(subjectLabels).find(k => subjectLabels[k] === subject) || ''] || '#c4b5fd',
+    }))
+    const byCategory = Object.entries(byCategoryMap).map(([category, count]) => ({ category, count }))
+      .sort((a, b) => b.count - a.count)
+    const byKnowledgePoint = Object.entries(byKPMap).map(([point, count]) => ({ point, count }))
+      .sort((a, b) => b.count - a.count).slice(0, 10)
+    const byDifficulty = [1, 2, 3, 4, 5].map(level => ({ level, label: difficultyLabels[level], count: byDiffMap[level] }))
+
+    return { bySubject, byCategory, byKnowledgePoint, byDifficulty }
+  })
+
+  // AI 推荐选题：优先选复习次数少、难度高、且未解决的题目
+  const aiRecommendedIds = computed(() => {
+    const pool = questions.value
+      .filter(q => !q.resolved)
+      .sort((a, b) => {
+        const scoreA = (5 - a.reviewCount) * 2 + a.difficulty
+        const scoreB = (5 - b.reviewCount) * 2 + b.difficulty
+        return scoreB - scoreA
+      })
+    return pool.slice(0, 10).map(q => q.id)
+  })
+
+  const selectedQuestions = computed(() =>
+    questions.value.filter(q => selectedIds.value.has(q.id))
+  )
+
+  // CRUD
+  function addQuestion(data: Omit<QuestionItem, 'id' | 'reviewCount' | 'resolved' | 'createdAt' | 'updatedAt'>) {
+    const now = new Date().toISOString()
+    const q: QuestionItem = { ...data, id: `q-${Date.now()}`, reviewCount: 0, resolved: false, createdAt: now, updatedAt: now }
+    questions.value.unshift(q)
+    return q
+  }
+
+  function updateQuestion(id: string, patch: Partial<QuestionItem>) {
+    const q = questions.value.find(x => x.id === id)
+    if (q) Object.assign(q, patch, { updatedAt: new Date().toISOString() })
+  }
+
+  function deleteQuestion(id: string) {
+    questions.value = questions.value.filter(q => q.id !== id)
+    selectedIds.value.delete(id)
+  }
+
+  function markResolved(id: string) {
+    updateQuestion(id, { resolved: true })
+  }
+
+  function incrementReview(id: string) {
+    const q = questions.value.find(x => x.id === id)
+    if (q) updateQuestion(id, { reviewCount: q.reviewCount + 1 })
+  }
+
+  // 选题管理
+  function toggleSelect(id: string) {
+    if (selectedIds.value.has(id)) selectedIds.value.delete(id)
+    else selectedIds.value.add(id)
+  }
+
+  function selectAll(ids: string[]) {
+    ids.forEach(id => selectedIds.value.add(id))
+  }
+
+  function clearSelection() {
+    selectedIds.value.clear()
+  }
+
+  function applyAiSelection() {
+    clearSelection()
+    aiRecommendedIds.value.forEach(id => selectedIds.value.add(id))
+  }
+
+  // 导入题库
+  function importQuestions(raw: QuestionBankExportFormat, fileName: string): QuestionBankImport {
+    const now = new Date().toISOString()
+    let importedCount = 0
+    const errors: string[] = []
+    const importId = `imp-${Date.now()}`
+
+    if (raw.version !== '1.0') {
+      const rec: QuestionBankImport = { id: importId, fileName, totalCount: 0, importedCount: 0, failedCount: 0, status: 'failed', errors: ['版本号不支持，仅支持 version: "1.0"'], importedAt: now }
+      imports.value.unshift(rec)
+      return rec
+    }
+
+    const validSubjects = ['math', 'chinese', 'english', 'science', 'other']
+    const validTypes = ['choice', 'fill', 'calculation', 'composition', 'other']
+
+    for (let i = 0; i < raw.questions.length; i++) {
+      const item = raw.questions[i]
+      if (!item.content?.trim()) { errors.push(`第${i + 1}题: content(题目正文)为必填项`); continue }
+      if (!validSubjects.includes(item.subject)) { errors.push(`第${i + 1}题: subject 不合法，应为 ${validSubjects.join('/')}`); continue }
+      if (!validTypes.includes(item.type)) { errors.push(`第${i + 1}题: type 不合法，应为 ${validTypes.join('/')}`); continue }
+      const grade = item.grade ?? raw.schoolInfo?.grade ?? 3
+      const difficulty = Math.min(5, Math.max(1, item.difficulty ?? 3)) as 1|2|3|4|5
+      const q: QuestionItem = {
+        id: `q-${Date.now()}-${i}`, subject: item.subject as QuestionSubject, type: item.type as QuestionType,
+        content: item.content.trim(), answer: item.answer, grade, chapter: item.chapter,
+        knowledgePoints: item.knowledgePoints ?? [], difficulty, tags: item.tags ?? [],
+        reviewCount: 0, resolved: false, source: 'import', importId,
+        createdAt: now, updatedAt: now,
+      }
+      questions.value.unshift(q)
+      importedCount++
+    }
+
+    const status = errors.length === 0 ? 'success' : importedCount > 0 ? 'partial' : 'failed'
+    const rec: QuestionBankImport = { id: importId, fileName, totalCount: raw.questions.length, importedCount, failedCount: errors.length, status, errors, importedAt: now }
+    imports.value.unshift(rec)
+    return rec
+  }
+
+  // 导出为标准格式
+  function exportQuestions(ids?: string[]): QuestionBankExportFormat {
+    const list = ids ? questions.value.filter(q => ids.includes(q.id)) : questions.value
+    return {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      questions: list.map(q => ({
+        subject: q.subject, type: q.type, content: q.content, answer: q.answer,
+        grade: q.grade, chapter: q.chapter, knowledgePoints: q.knowledgePoints,
+        difficulty: q.difficulty, tags: q.tags,
+      })),
+    }
+  }
+
+  return {
+    questions, imports, selectedIds, selectedQuestions, printPreviewVisible, printIncludeAnswer,
+    totalCount, unresolvedCount, todayAddedCount, weaknessChartData, aiRecommendedIds,
+    addQuestion, updateQuestion, deleteQuestion, markResolved, incrementReview,
+    toggleSelect, selectAll, clearSelection, applyAiSelection,
+    importQuestions, exportQuestions,
+  }
 })

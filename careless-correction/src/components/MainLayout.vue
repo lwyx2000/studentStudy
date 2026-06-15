@@ -11,16 +11,19 @@ const isParent = computed(() => userStore.profile.role === 'parent')
 const childNavItems = [
   { name: 'Dashboard', path: '/dashboard', icon: '🌳', label: '协同仪表盘' },
   { name: 'HabitCenter', path: '/habit', icon: '✅', label: '习惯打印' },
-  { name: 'MistakeBook', path: '/mistake', icon: '🔎', label: '黄金一问' },
+  { name: 'TreasureBank', path: '/mistake', icon: '🏴‍☠️', label: '藏宝库' },
   { name: 'ItemTracker', path: '/tracker', icon: '🎒', label: '物品实验室' },
   { name: 'GrowthArchive', path: '/growth', icon: '📈', label: '成长档案' },
   { name: 'TimeTaskCabin', path: '/time-task', icon: '⏱️', label: '自治舱' },
   { name: 'BadgeRoom', path: '/badge', icon: '🏅', label: '契约勋章' },
+  { name: 'UsageGuide', path: '/guide', icon: '📖', label: '使用说明' },
 ]
 const parentNavItems = [
   { name: 'ParentControl', path: '/parent', icon: '🧭', label: '家长控制' },
+  { name: 'HabitAssign', path: '/parent/habit-assign', icon: '📋', label: '习惯布置' },
   { name: 'EvidenceLab', path: '/parent/lab', icon: '🔬', label: '循证实验室' },
   { name: 'CommunityGarden', path: '/parent/garden', icon: '🌸', label: '社区花园' },
+  { name: 'UsageGuide', path: '/guide', icon: '📖', label: '使用说明' },
 ]
 const navItems = computed(() => (isParent.value ? parentNavItems : childNavItems))
 

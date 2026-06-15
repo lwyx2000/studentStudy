@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMistakeStore, useTaskStore, useUserStore } from '../../stores'
 
@@ -10,6 +10,10 @@ const mistakeStore = useMistakeStore()
 const isHighGrade = computed(() => userStore.profile.grade >= 5)
 const mainTask = computed(() => taskStore.todayTasks.find(task => task.type === 'habit') || taskStore.todayTasks[0])
 const progressPercent = computed(() => Math.round((taskStore.weeklyProgress / Math.max(taskStore.todayTasks.length, 1)) * 100))
+
+onMounted(() => {
+  if (userStore.profile.id) taskStore.fetchHabits(userStore.profile.id)
+})
 
 function completeTask(id: string) {
   const points = taskStore.completeTask(id)

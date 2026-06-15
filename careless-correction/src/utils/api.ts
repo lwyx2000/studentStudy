@@ -1,4 +1,4 @@
-import type { ArticleResource, BadgeItem, DiagnosticAlert, DiscussionPost, FamilyCovenant, GrowthDataPoint, HabitSOP, ItemLossRecord, MistakeRecord, ParentSettings, PomodoroSession, TaskItem } from '../types'
+import type { ArticleResource, BadgeItem, DiagnosticAlert, DiscussionPost, FamilyCovenant, GrowthDataPoint, HabitSOP, HabitAssignment, ItemLossRecord, MistakeRecord, ParentSettings, PomodoroSession, TaskItem, QuestionItem, QuestionBankImport, QuestionBankExportFormat, WeaknessChartData } from '../types'
 
 const API_BASE = '/api/v1'
 
@@ -32,6 +32,15 @@ export const api = {
     getToday: (userId: string) => request<TaskItem[]>(`/tasks/today/${userId}`),
     complete: (taskId: string) => request<{ points: number }>(`/tasks/${taskId}/complete`, { method: 'POST' }),
     getHabitSOP: (userId: string) => request<HabitSOP>(`/tasks/habit-sop/${userId}`),
+  },
+  habits: {
+    list: (childId: string) => request<HabitAssignment[]>(`/habits/${childId}`),
+    create: (data: Omit<HabitAssignment, 'id' | 'assignedAt'>) =>
+      request<HabitAssignment>('/habits', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<HabitAssignment>) =>
+      request<HabitAssignment>(`/habits/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deactivate: (id: string) =>
+      request<{ active: boolean }>(`/habits/${id}/deactivate`, { method: 'POST' }),
   },
   mistakes: {
     uploadImage: (formData: FormData) => request<{ imageUrl: string }>('/mistakes/upload', { method: 'POST', body: formData }),
@@ -88,5 +97,40 @@ export const api = {
   articles: {
     list: (category?: string) => request<ArticleResource[]>(`/articles${category ? `?category=${category}` : ''}`),
     getSuggested: (userId: string) => request<ArticleResource[]>(`/articles/suggested/${userId}`),
+  },
+  questions: {
+    list: (userId: string, params?: { page?: number; pageSize?: number; subject?: string; resolved?: boolean; source?: string }) => {
+      const q = new URLSearchParams()
+      if (params?.page) q.set('page', String(params.page))
+      if (params?.pageSize) q.set('pageSize', String(params.pageSize))
+      if (params?.subject) q.set('subject', params.subject)
+      if (params?.resolved !== undefined) q.set('resolved', String(params.resolved))
+      if (params?.source) q.set('source', params.source)
+      return request<{ total: number; list: QuestionItem[] }>(`/questions/${userId}?${q}`)
+    },
+    create: (data: Partial<QuestionItem>) =>
+      request<QuestionItem>('/questions', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<QuestionItem>) =>
+      request<QuestionItem>(`/questions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<{ deleted: boolean }>(`/questions/${id}`, { method: 'DELETE' }),
+    resolve: (id: string) =>
+      request<{ resolved: boolean }>(`/questions/${id}/resolve`, { method: 'POST' }),
+    review: (id: string) =>
+      request<{ reviewCount: number }>(`/questions/${id}/review`, { method: 'POST' }),
+    stats: (userId: string) =>
+      request<{ totalCount: number; unresolvedCount: number; todayAddedCount: number }>(`/questions/stats/${userId}`),
+    aiRecommend: (userId: string, data?: { maxCount?: number; subject?: string; difficultyMin?: number }) =>
+      request<{ recommendedIds: string[]; reason: string }>(`/questions/ai-recommend/${userId}`, { method: 'POST', body: JSON.stringify(data || {}) }),
+    print: (data: { questionIds: string[]; mode: 'manual' | 'ai'; title?: string; includeAnswer?: boolean }) =>
+      request<{ pdfUrl: string; questionCount: number }>(`/questions/print`, { method: 'POST', body: JSON.stringify(data) }),
+    importFile: (formData: FormData) =>
+      request<QuestionBankImport>('/questions/import', { method: 'POST', body: formData }),
+    export: (data?: { questionIds?: string[]; format?: string }) =>
+      request<QuestionBankExportFormat>('/questions/export', { method: 'POST', body: JSON.stringify(data || {}) }),
+    imports: (userId: string, page?: number) =>
+      request<{ total: number; list: QuestionBankImport[] }>(`/questions/imports/${userId}?page=${page || 1}`),
+    weakness: (userId: string) =>
+      request<WeaknessChartData>(`/questions/weakness/${userId}`),
   },
 }

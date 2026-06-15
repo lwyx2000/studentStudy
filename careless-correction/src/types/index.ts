@@ -127,6 +127,20 @@ export interface SOPStep {
   gifUrl?: string
 }
 
+export interface HabitAssignment {
+  id: string
+  childId: string
+  parentId: string
+  title: string
+  description: string
+  icon: string
+  rewardPoints: number
+  weekNumber: number
+  steps: SOPStep[]
+  assignedAt: string
+  active: boolean
+}
+
 export interface DiscussionPost {
   id: string
   title: string
@@ -147,4 +161,78 @@ export interface ArticleResource {
   readingTime: number
   imageUrl: string
   bookmarked: boolean
+}
+
+// ==================
+// 藏宝库 (题库) 类型
+// ==================
+
+export type QuestionSubject = 'math' | 'chinese' | 'english' | 'science' | 'other'
+export type QuestionType = 'choice' | 'fill' | 'calculation' | 'composition' | 'other'
+
+export interface QuestionItem {
+  id: string
+  subject: QuestionSubject
+  type: QuestionType
+  content: string           // 题目正文
+  answer?: string           // 参考答案
+  imageUrl?: string         // 题目图片
+  grade: number             // 适用年级 1-6
+  chapter?: string          // 教材章节
+  knowledgePoints: string[] // 知识点标签
+  difficulty: 1 | 2 | 3 | 4 | 5  // 难度
+  tags: string[]            // 自定义标签
+  isCarelessness?: boolean  // 是否粗心型
+  mistakeCategory?: MistakeCategory // 粗心分类
+  reviewCount: number       // 已复习次数
+  resolved: boolean         // 是否已解决
+  source: 'manual' | 'photo' | 'import' // 来源
+  importId?: string         // 关联导入批次
+  createdAt: string
+  updatedAt: string
+}
+
+export interface QuestionBankImport {
+  id: string
+  fileName: string
+  totalCount: number
+  importedCount: number
+  failedCount: number
+  status: 'pending' | 'success' | 'partial' | 'failed'
+  errors: string[]
+  importedAt: string
+}
+
+/** 标准题库导入JSON格式 v1.0 */
+export interface QuestionBankExportFormat {
+  version: '1.0'
+  exportedAt: string
+  schoolInfo?: { name?: string; grade?: number }
+  questions: QuestionBankExportItem[]
+}
+
+export interface QuestionBankExportItem {
+  subject: QuestionSubject
+  type: QuestionType
+  content: string           // 必填
+  answer?: string
+  grade?: number
+  chapter?: string
+  knowledgePoints?: string[]
+  difficulty?: number
+  tags?: string[]
+}
+
+export interface WeaknessChartData {
+  bySubject: { subject: string; count: number; color: string }[]
+  byCategory: { category: string; count: number }[]
+  byKnowledgePoint: { point: string; count: number }[]
+  byDifficulty: { level: number; label: string; count: number }[]
+}
+
+export interface PrintSelection {
+  questionIds: string[]
+  mode: 'manual' | 'ai'
+  title?: string
+  includeAnswer: boolean
 }
