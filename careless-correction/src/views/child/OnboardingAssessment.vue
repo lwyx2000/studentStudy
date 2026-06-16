@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useUserStore } from '../../stores'
+import { useBadgeStore, useGrowthStore, useMistakeStore, useParentStore, useTaskStore, useUserStore } from '../../stores'
 
 const router = useRouter()
 const userStore = useUserStore()
-const name = ref(userStore.profile.name || 'Leo')
+const name = ref(userStore.profile.name || '')
 const grade = ref(userStore.profile.grade || 3)
 const focus = ref(userStore.assessment.focusAttention)
 const organization = ref(userStore.assessment.organization)
@@ -24,8 +24,7 @@ const sliders = computed(() => [
 const averageScore = computed(() => (focus.value + organization.value + emotion.value + planning.value + impulse.value) / 5)
 const recommendedLevel = computed(() => Math.max(1, Math.min(5, Math.round(6 - averageScore.value))))
 
-function generateProfile() {
-  userStore.setProfile({ name: name.value, grade: grade.value, role: 'child' })
+async function generateProfile() {
   userStore.setAssessment({
     focusAttention: focus.value,
     organization: organization.value,
@@ -35,6 +34,13 @@ function generateProfile() {
     recommendedLevel: recommendedLevel.value,
   })
   userStore.completeOnboarding()
+  await Promise.allSettled([
+    useTaskStore().fetchFromApi(),
+    useMistakeStore().fetchFromApi(),
+    useBadgeStore().fetchFromApi(),
+    useGrowthStore().fetchFromApi(),
+    useParentStore().fetchFromApi(),
+  ])
   generated.value = true
 }
 function enterDashboard() { router.push('/dashboard') }

@@ -1,19 +1,24 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMistakeStore, useTaskStore, useUserStore } from '../../stores'
+import { useGrowthStore, useMistakeStore, useTaskStore, useUserStore } from '../../stores'
 
 const router = useRouter()
 const userStore = useUserStore()
 const taskStore = useTaskStore()
 const mistakeStore = useMistakeStore()
+const growthStore = useGrowthStore()
 const isHighGrade = computed(() => userStore.profile.grade >= 5)
-const mainTask = computed(() => taskStore.todayTasks.find(task => task.type === 'habit') || taskStore.todayTasks[0])
+const mainTask = computed(() => taskStore.todayTasks.find(task => task.type === 'study_habit') || taskStore.todayTasks[0])
 const progressPercent = computed(() => Math.round((taskStore.weeklyProgress / Math.max(taskStore.todayTasks.length, 1)) * 100))
 
 function completeTask(id: string) {
   const points = taskStore.completeTask(id)
-  if (points) userStore.addSunlightPoints(points)
+  if (points) {
+    userStore.addSunlightPoints(points, `完成任务：${taskStore.todayTasks.find(t => t.id === id)?.title || ''}`)
+    const done = taskStore.todayTasks.filter(t => t.status === 'completed').length
+    growthStore.recordDataPoint({ taskCompletionRate: done / taskStore.todayTasks.length })
+  }
 }
 </script>
 
@@ -58,12 +63,12 @@ function completeTask(id: string) {
 
     <template v-else>
       <section class="grid-2">
-        <div class="panel dark-panel">
-          <div class="card-title"><h2>今日时间轴</h2><button class="btn secondary" @click="router.push('/time-task')">打开番茄钟</button></div>
-          <div class="timeline"><div class="timeline-row"><b>17:00</b><div class="timeline-bar"></div></div><div class="timeline-row"><b>18:20</b><div class="timeline-bar" style="width:80%"></div></div><div class="timeline-row"><b>20:00</b><div class="timeline-bar" style="width:55%"></div></div></div>
+        <div class="panel">
+          <div class="card-title"><h2>阳光值</h2><button class="btn secondary" @click="router.push('/sunlight')">去兑换</button></div>
+          <div class="kpi"><strong>☀️ {{ userStore.sunlightPoints }}</strong><span>完成任务赚阳光值，攒够了换奖励</span></div>
         </div>
         <div class="panel"><div class="card-title"><h2>今日任务优先级</h2><span class="tag">{{ taskStore.todayTasks.length }} 项</span></div><div class="list"><div v-for="task in taskStore.todayTasks" :key="task.id" class="list-row"><span>{{ task.icon }} {{ task.title }}</span><button class="btn ghost" :disabled="task.status === 'completed'" @click="completeTask(task.id)">{{ task.status === 'completed' ? '完成' : '完成' }}</button></div></div></div>
-        <div class="panel"><div class="card-title"><h2>错题复习提醒</h2><button class="btn ghost" @click="router.push('/mistake')">去复习</button></div><div class="kpi"><strong>{{ mistakeStore.todayReviewCount }} 题</strong><span>今日待复习 · {{ Object.keys(mistakeStore.categoryStats).length }} 类错误</span></div></div>
+        <div class="panel"><div class="card-title"><h2>错题复习提醒</h2><button class="btn ghost" @click="router.push('/mistake')">去复习</button></div><div class="kpi"><strong>{{ mistakeStore.records.length }} 题</strong><span>题库总计 · 随时查看复习</span></div></div>
         <div class="panel"><div class="card-title"><h2>空间收纳状态</h2><button class="btn ghost" @click="router.push('/tracker')">查看</button></div><div class="progress"><span :style="{ width: `${Math.min(100, progressPercent + 30)}%` }"></span></div><p class="lead">试卷归档随整理任务完成提升。</p></div>
       </section>
     </template>

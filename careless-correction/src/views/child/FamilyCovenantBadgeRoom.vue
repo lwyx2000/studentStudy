@@ -7,7 +7,7 @@ const userStore = useUserStore()
 const goal = ref('连续 5 天睡前整理书桌 3 分钟')
 const reward = ref('周五亲子电影夜')
 const childSignature = ref(userStore.profile.name || 'Leo')
-const parentSignature = ref('Mum')
+const parentSignature = ref('')
 const warning = computed(() => /钱|现金|元|红包/.test(reward.value))
 function createCovenant() {
   if (warning.value) return

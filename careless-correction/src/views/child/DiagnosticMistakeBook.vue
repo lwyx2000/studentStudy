@@ -1,60 +1,205 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
+import { subjectOptions } from '../../utils/constants'
 import { useMistakeStore } from '../../stores'
-import type { MistakeCategory } from '../../types'
+import { api } from '../../utils/api'
 
 const mistakeStore = useMistakeStore()
-const subject = ref('数学')
-const canRedo = ref<boolean | null>(null)
-const category = ref<MistakeCategory>('symbol_error')
-const knowledgePoint = ref('')
+const subject = ref(subjectOptions[0])
+const subjectTag = ref('')
 const imageName = ref('')
-const draftName = ref('')
-const diagnosisSaved = ref(false)
-const categories: { value: MistakeCategory; label: string; icon: string }[] = [
-  { value: 'symbol_error', label: '看错符号', icon: '+ → -' },
-  { value: 'unit_missing', label: '漏写单位', icon: '35 → [ ]' },
-  { value: 'misread_details', label: '读题遗漏', icon: '跳字' },
-  { value: 'copying_error', label: '抄写错误', icon: '抄错' },
-  { value: 'skipped_step', label: '跳步计算', icon: '1→3' },
-  { value: 'rushing', label: '急于求成', icon: '快' },
-  { value: 'lost_focus', label: '注意力涣散', icon: '雾' },
-  { value: 'messy_writing', label: '书写混乱', icon: '乱' },
-  { value: 'format_error', label: '格式错误', icon: '格' },
-  { value: 'spelling_slip', label: '笔误/拼写', icon: 'typo' },
-  { value: 'wild_guess', label: '盲目猜测', icon: '?' },
-  { value: 'something_else', label: '其他原因', icon: '…' },
-]
-const reviewPlan = computed(() => canRedo.value ? ['今天：重新读题并圈符号', '3 天后：遮答案复做', '7 天后：同类题迁移'] : ['今天：标记知识点', '明天：补一个例题', '3 天后：再做同类题'])
+const imageFile = ref<File | null>(null)
+const saved = ref(false)
+const uploading = ref(false)
 
-function handleImage(event: Event, target: 'question' | 'draft') {
+function handleImage(event: Event) {
   const input = event.target as HTMLInputElement
-  const name = input.files?.[0]?.name || ''
-  if (target === 'question') imageName.value = name
-  else draftName.value = name
+  const file = input.files?.[0]
+  if (file) {
+    imageName.value = file.name
+    imageFile.value = file
+  }
 }
 
-function saveDiagnosis() {
-  if (!imageName.value || canRedo.value === null) return
-  mistakeStore.addRecord({
-    subject: subject.value,
-    imageUrl: imageName.value,
-    isCarelessness: canRedo.value,
-    category: canRedo.value ? category.value : undefined,
-    knowledgePoint: canRedo.value ? undefined : knowledgePoint.value || '待补充知识点',
-  })
-  diagnosisSaved.value = true
+async function saveRecord() {
+  if (!imageFile.value) return
+  uploading.value = true
+  try {
+    // 上传图片到后端，获取真实 URL
+    const formData = new FormData()
+    formData.append('image', imageFile.value)
+    const { imageUrl } = await api.mistakes.uploadImage(formData)
+    mistakeStore.addRecord({
+      subject: subject.value,
+      imageUrl,
+      subjectTag: subjectTag.value || undefined,
+    })
+    imageName.value = ''
+    imageFile.value = null
+    subjectTag.value = ''
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 2000)
+  } catch (e) {
+    // 离线降级：用本地文件名
+    mistakeStore.addRecord({
+      subject: subject.value,
+      imageUrl: imageName.value,
+      subjectTag: subjectTag.value || undefined,
+    })
+    imageName.value = ''
+    imageFile.value = null
+    subjectTag.value = ''
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 2000)
+  } finally {
+    uploading.value = false
+  }
+}
+
+function removeRecord(id: string) {
+  mistakeStore.removeRecord(id)
 }
 </script>
 
 <template>
   <div class="page">
-    <section class="page-hero"><div class="hero-card"><span class="eyebrow">🔎 “黄金一问”智能错题本</span><h1>先问原因，再安排复习</h1><p class="lead">拍照录入错题后，先区分“会但做错”和“知识漏洞”，再分别进入粗心分类或知识点归档。</p></div><div class="panel"><div class="card-title"><h2>今日待复习</h2><span class="tag">{{ mistakeStore.todayReviewCount }} 题</span></div><div class="kpi"><strong>{{ Object.keys(mistakeStore.categoryStats).length }}</strong><span>已记录错误类型</span></div></div></section>
-    <section class="grid-2"><div class="panel"><label class="photo-drop">📸<strong>{{ imageName || '上传错题照片' }}</strong><span>自动裁切题目区域、识别学科和题干</span><input type="file" accept="image/*" @change="handleImage($event, 'question')" /></label><label class="photo-drop draft">📝<strong>{{ draftName || '上传草稿纸痕迹' }}</strong><span>红框提示对位歪斜、跳步或书写混乱区域</span><input type="file" accept="image/*" @change="handleImage($event, 'draft')" /></label></div><div class="panel"><div class="card-title"><h2>黄金一问</h2><span class="tag">{{ canRedo === null ? '待判断' : canRedo ? '粗心/执行功能' : '知识漏洞' }}</span></div><label>学科<select v-model="subject" class="input"><option>数学</option><option>语文</option><option>英语</option></select></label><h3>Leo 能重新自己立刻做对这道题吗？</h3><div class="stepper"><button class="btn" :class="{ secondary: canRedo === true }" @click="canRedo = true">能，只是粗心</button><button class="btn ghost" :class="{ secondary: canRedo === false }" @click="canRedo = false">不能/不确定</button></div><div v-if="canRedo" class="category-grid"><button v-for="cat in categories" :key="cat.value" class="category-card" :class="{ active: category === cat.value }" @click="category = cat.value"><b>{{ cat.icon }}</b><span>{{ cat.label }}</span></button></div><label v-else-if="canRedo === false">知识点归档<input v-model="knowledgePoint" class="input" placeholder="例如：小数乘法进位" /></label><button class="btn" :disabled="!imageName || canRedo === null" @click="saveDiagnosis">保存诊断并安排复习</button><p v-if="diagnosisSaved" class="note">已保存，并纳入 {{ canRedo ? '粗心数据分析' : '知识点复习计划' }}。</p></div></section>
-    <section class="panel"><div class="card-title"><h2>复习策略</h2><span class="tag">自动匹配</span></div><div class="grid-3"><div v-for="plan in reviewPlan" :key="plan" class="kpi"><strong>{{ plan.split('：')[0] }}</strong><span>{{ plan.split('：')[1] }}</span></div></div></section>
+    <section class="page-hero">
+      <div class="hero-card">
+        <span class="eyebrow">📚 我的题库</span>
+        <h1>记录和整理错题</h1>
+        <p class="lead">拍照上传错题照片，添加学科标签，构建自己的专属复习题库。随时查看和回顾错题，巩固知识薄弱点。</p>
+      </div>
+      <div class="panel">
+        <div class="card-title">
+          <h2>题库概览</h2>
+          <span class="tag">{{ mistakeStore.records.length }} 题</span>
+        </div>
+        <div class="kpi">
+          <strong>{{ mistakeStore.records.length }}</strong>
+          <span>已收录错题</span>
+        </div>
+        <div class="subject-summary" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <span
+            v-for="sub in [...new Set(mistakeStore.records.map(r => r.subject))]"
+            :key="sub"
+            class="tag"
+          >{{ sub }}</span>
+          <span v-if="!mistakeStore.records.length" class="muted">暂无错题记录</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="panel">
+        <div class="card-title">
+          <h2>添加错题</h2>
+          <span v-if="saved" class="tag" style="background:#ecffd9;color:var(--primary)">✓ 已保存</span>
+        </div>
+        <label class="photo-drop">
+          <span style="font-size:48px">📸</span>
+          <strong>{{ imageName || '上传错题照片' }}</strong>
+          <span>点击选择错题照片，支持拍照或从相册选取</span>
+          <input type="file" accept="image/*" @change="handleImage" />
+        </label>
+        <label style="display:block;margin-top:16px;font-weight:800">
+          学科
+          <select v-model="subject" class="input" style="margin-top:6px">
+            <option>数学</option>
+            <option>语文</option>
+            <option>英语</option>
+            <option>科学</option>
+            <option>其他</option>
+          </select>
+        </label>
+        <label style="display:block;margin-top:12px;font-weight:800">
+          知识点标签（可选）
+          <input
+            v-model="subjectTag"
+            class="input"
+            style="margin-top:6px"
+            placeholder="例如：分数运算、阅读细节定位"
+          />
+        </label>
+        <button
+          class="btn"
+          style="margin-top:18px;width:100%"
+          :disabled="!imageName || uploading"
+          @click="saveRecord"
+        >
+          {{ uploading ? '上传中...' : '保存到题库' }}
+        </button>
+      </div>
+
+      <div class="panel">
+        <div class="card-title">
+          <h2>错题列表</h2>
+          <span class="tag">{{ mistakeStore.records.length }} 条记录</span>
+        </div>
+        <div v-if="mistakeStore.records.length" class="list">
+          <div
+            v-for="record in mistakeStore.records"
+            :key="record.id"
+            class="list-row"
+          >
+            <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+              <span style="font-size:28px;flex-shrink:0">📸</span>
+              <div style="min-width:0">
+                <strong>{{ record.subject }}</strong>
+                <span v-if="record.subjectTag" class="muted" style="display:block;font-size:13px">
+                  {{ record.subjectTag }}
+                </span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              <span class="tag" style="font-size:12px">
+                {{ new Date(record.createdAt).toLocaleDateString() }}
+              </span>
+              <button
+                class="btn ghost"
+                style="padding:6px 10px;font-size:13px"
+                @click="removeRecord(record.id)"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-else class="muted" style="text-align:center;padding:32px">
+          还没有错题记录，拍张照片开始吧 📷
+        </p>
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.photo-drop{min-height:220px;border-radius:28px;background:linear-gradient(180deg,#eef8ff,#fff);border:2px dashed var(--blue);display:grid;place-items:center;text-align:center;font-size:58px;color:var(--muted);margin-bottom:16px;cursor:pointer}.photo-drop.draft{background:linear-gradient(180deg,#fff8df,#fff)}.photo-drop strong,.photo-drop span{display:block;font-size:18px}.photo-drop input{display:none}.category-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0}.category-card{padding:12px;border-radius:16px;background:#fff;border:1px solid var(--line);display:grid;gap:4px;color:var(--ink)}.category-card.active{background:#ecffd9;border-color:var(--primary);color:var(--primary)}.note{padding:14px;border-radius:18px;background:#fff8d9;color:#6e5e00}button:disabled{opacity:.5;cursor:not-allowed}
+.photo-drop {
+  min-height: 200px;
+  border-radius: 28px;
+  background: linear-gradient(180deg, #eef8ff, #fff);
+  border: 2px dashed var(--blue);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-size: 48px;
+  color: var(--muted);
+  padding: 24px;
+  cursor: pointer;
+  transition: border-color .15s ease;
+}
+.photo-drop:hover {
+  border-color: var(--primary);
+}
+.photo-drop strong,
+.photo-drop span {
+  display: block;
+  font-size: 17px;
+}
+.photo-drop input {
+  display: none;
+}
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
 </style>
