@@ -228,41 +228,41 @@ const particlesOptions: ISourceOptions = {
   position: relative;
   z-index: 10;
   width: 100%;
-  max-width: 400px;
-  margin: 24px;
-  padding: 36px 30px 30px;
-  border-radius: 28px;
-  background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.85);
+  max-width: 560px;
+  margin: 40px;
+  padding: 52px 44px 42px;
+  border-radius: 36px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   box-shadow:
-    0 8px 32px rgba(60, 130, 70, 0.12),
-    0 2px 8px rgba(0, 0, 0, 0.06),
+    0 16px 56px rgba(60, 130, 70, 0.18),
+    0 6px 16px rgba(0, 0, 0, 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 28px;
 }
 
 /* ── Logo ── */
 .logo {
   text-align: center;
-  padding-bottom: 4px;
+  padding-bottom: 8px;
 }
 .tree-wrap {
   display: inline-block;
   position: relative;
-  width: 68px;
-  height: 68px;
-  margin-bottom: 10px;
+  width: 92px;
+  height: 92px;
+  margin-bottom: 14px;
 }
 .tree-icon {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
-  font-size: 44px;
+  font-size: 56px;
   animation: sway 4s ease-in-out infinite;
   transform-origin: bottom center;
   z-index: 2;
@@ -279,21 +279,21 @@ const particlesOptions: ISourceOptions = {
   border: 2px solid rgba(76, 175, 80, 0.25);
   animation: ring-out 3s ease-out infinite;
 }
-.r1 { width: 56px; height: 56px; animation-delay: 0s; }
-.r2 { width: 68px; height: 68px; animation-delay: 1s; }
+.r1 { width: 72px; height: 72px; animation-delay: 0s; }
+.r2 { width: 92px; height: 92px; animation-delay: 1s; }
 @keyframes ring-out {
   0%   { transform: scale(0.7); opacity: 0.7; }
   100% { transform: scale(1.5); opacity: 0; }
 }
 .logo h1 {
-  font-size: 21px;
+  font-size: 28px;
   font-weight: 950;
   color: #2e7d32;
   letter-spacing: -0.03em;
-  margin: 0 0 3px;
+  margin: 0 0 5px;
 }
 .subtitle {
-  font-size: 13px;
+  font-size: 15px;
   color: #94a3b8;
   margin: 0;
   font-weight: 600;
@@ -305,18 +305,18 @@ const particlesOptions: ISourceOptions = {
   display: grid;
   grid-template-columns: 1fr 1fr;
   background: #f1f5f1;
-  border-radius: 14px;
-  padding: 4px;
+  border-radius: 18px;
+  padding: 6px;
 }
 .tab-bar button {
   position: relative;
   z-index: 2;
   border: none;
   background: transparent;
-  padding: 9px;
-  border-radius: 10px;
+  padding: 13px 12px;
+  border-radius: 14px;
   font-weight: 800;
-  font-size: 14px;
+  font-size: 17px;
   cursor: pointer;
   color: #94a3b8;
   transition: color 0.2s;
@@ -324,11 +324,11 @@ const particlesOptions: ISourceOptions = {
 .tab-bar button.active { color: #2e7d32; }
 .tab-slider {
   position: absolute;
-  top: 4px; left: 4px;
-  bottom: 4px;
-  width: calc(50% - 4px);
+  top: 6px; left: 6px;
+  bottom: 6px;
+  width: calc(50% - 6px);
   background: #fff;
-  border-radius: 10px;
+  border-radius: 14px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -343,13 +343,13 @@ const particlesOptions: ISourceOptions = {
 .form-slide-leave-to  { opacity: 0; transform: translateX(-10px); }
 
 /* ── 表单 ── */
-.form { display: flex; flex-direction: column; gap: 13px; }
+.form { display: flex; flex-direction: column; gap: 18px; }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  font-size: 13px;
+  gap: 7px;
+  font-size: 15px;
   font-weight: 800;
   color: #475569;
 }
@@ -360,28 +360,28 @@ const particlesOptions: ISourceOptions = {
 }
 .icon {
   position: absolute;
-  left: 11px;
-  font-size: 15px;
+  left: 16px;
+  font-size: 21px;
   pointer-events: none;
   z-index: 2;
 }
 .inp {
   width: 100%;
-  padding: 10px 12px 10px 36px;
-  border-radius: 12px;
-  border: 1.5px solid #e2e8f0;
+  padding: 15px 18px 15px 50px;
+  border-radius: 16px;
+  border: 2px solid #e2e8f0;
   background: rgba(255,255,255,0.9);
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 600;
   color: #1e293b;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
   box-sizing: border-box;
 }
-.inp::placeholder { color: #cbd5e1; }
+.inp::placeholder { color: #cbd5e1; font-size: 16px; }
 .inp:focus {
   border-color: #4caf50;
-  box-shadow: 0 0 0 3px rgba(76,175,80,0.15);
+  box-shadow: 0 0 0 5px rgba(76,175,80,0.18);
 }
 
 /* ── 错误 ── */
@@ -392,62 +392,62 @@ const particlesOptions: ISourceOptions = {
 
 .error-msg {
   margin: 0;
-  padding: 10px 13px;
-  border-radius: 11px;
+  padding: 14px 16px;
+  border-radius: 14px;
   background: #fef2f2;
   border: 1px solid #fecaca;
   color: #dc2626;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
 }
 
 /* ── 提交按钮 ── */
 .submit-btn {
-  margin-top: 2px;
-  height: 46px;
-  border-radius: 13px;
+  margin-top: 6px;
+  height: 56px;
+  border-radius: 16px;
   border: none;
   background: linear-gradient(135deg, #4caf50 0%, #2e7d32 100%);
   color: #fff;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 900;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   cursor: pointer;
   display: grid;
   place-items: center;
-  box-shadow: 0 4px 18px rgba(46,125,50,0.35), 0 1px 0 rgba(255,255,255,0.15) inset;
+  box-shadow: 0 6px 22px rgba(46,125,50,0.38), 0 1px 0 rgba(255,255,255,0.15) inset;
   transition: transform 0.15s, box-shadow 0.15s;
 }
 .submit-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 8px 28px rgba(46,125,50,0.42);
+  box-shadow: 0 10px 32px rgba(46,125,50,0.45);
 }
 .submit-btn:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 10px rgba(46,125,50,0.3);
+  box-shadow: 0 4px 14px rgba(46,125,50,0.3);
 }
 .submit-btn:disabled { opacity: 0.65; cursor: not-allowed; }
 
 .btn-text {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .arrow {
-  font-size: 18px;
+  font-size: 22px;
   transition: transform 0.2s;
 }
-.submit-btn:hover:not(:disabled) .arrow { transform: translateX(4px); }
+.submit-btn:hover:not(:disabled) .arrow { transform: translateX(5px); }
 
 /* ── 三点加载 ── */
 .dot-loader {
   display: flex;
-  gap: 5px;
+  gap: 6px;
   align-items: center;
 }
 .dot-loader i {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #fff;
   animation: dot-bounce 1s ease-in-out infinite;
@@ -457,14 +457,15 @@ const particlesOptions: ISourceOptions = {
 .dot-loader i:nth-child(3) { animation-delay: 0.3s; }
 @keyframes dot-bounce {
   0%, 80%, 100% { transform: translateY(0); opacity: 0.6; }
-  40%           { transform: translateY(-7px); opacity: 1; }
+  40%           { transform: translateY(-8px); opacity: 1; }
 }
 
 .hint {
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
   text-align: center;
   margin: 0;
-  line-height: 1.5;
+  line-height: 1.6;
+  padding: 0 6px;
 }
 </style>

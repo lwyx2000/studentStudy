@@ -8,19 +8,46 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/v1/auth/register` | 注册（家长/孩子） |
-| POST | `/api/v1/auth/login` | 登录 |
+| POST | `/api/v1/auth/register` | 注册家长账号 |
+| POST | `/api/v1/auth/login` | 登录（家长用 name，孩子用 login_name） |
+| POST | `/api/v1/auth/child-login` | 家长端切换孩子视角（child_id + parent_id，无密码） |
 | GET | `/api/v1/auth/session` | 获取当前用户信息 |
 | PUT | `/api/v1/auth/profile` | 更新个人信息 |
+| PUT | `/api/v1/auth/password` | 修改密码（old_password + new_password） |
+
+### 孩子管理（仅家长）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/children` | 获取孩子列表 |
+| POST | `/api/v1/children` | 添加孩子（自动生成 login_name + 默认密码 qwe123） |
+| PUT | `/api/v1/children/{child_id}` | 更新孩子信息 |
+| DELETE | `/api/v1/children/{child_id}` | 删除孩子 |
+| POST | `/api/v1/children/{child_id}/switch-token` | 获取孩子视角 token |
 
 ### 任务打卡
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/tasks/today` | 获取今日任务列表 |
-| POST | `/api/v1/tasks/:id/complete` | 完成任务（返回获得阳光值） |
+| GET | `/api/v1/tasks/today` | 获取今日任务列表（含子任务） |
+| GET | `/api/v1/tasks/{task_id}` | 获取单个任务详情（含子任务） |
+| POST | `/api/v1/tasks/` | 创建任务（家长指定孩子） |
+| DELETE | `/api/v1/tasks/{task_id}` | 删除任务 |
+| POST | `/api/v1/tasks/{task_id}/complete` | 完成任务（返回获得阳光值） |
 | POST | `/api/v1/tasks/checkin` | 手机拍照打卡（接收图片，返回识别结果） |
 | GET | `/api/v1/tasks/checkin/history` | 打卡历史记录 |
+
+#### 子任务
+
+一个任务可包含多个子任务，用于区分平时和周末的内容。选择任务即选择其下所有子任务。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/tasks/{task_id}/subtasks` | 添加子任务（type 默认继承主任务，week_day 区分 weekday/weekend） |
+| PUT | `/api/v1/tasks/{task_id}/subtasks/{subtask_id}` | 更新子任务（可修改 type） |
+| DELETE | `/api/v1/tasks/{task_id}/subtasks/{subtask_id}` | 删除子任务 |
+
+> 添加日期: 2026-06-17
 
 ### 习惯 SOP
 

@@ -1,12 +1,12 @@
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Task, User
-from app.schemas import TaskOut
+from app.models import SubTask, Task, User
+from app.schemas import SubTaskOut, TaskOut
 
 router = APIRouter()
 
@@ -35,11 +35,33 @@ def get_today_tasks(
     target = resolve_target_user(current_user, child_id, db)
     tasks = (
         db.query(Task)
+        .options(selectinload(Task.sub_tasks))
         .filter(Task.fk_users == target.pk_users, Task.assigned_date == date.today())
         .order_by(Task.type)
         .all()
     )
     return {'tasks': [TaskOut.model_validate(t) for t in tasks]}
+
+
+@router.get('/{task_id}', response_model=TaskOut)
+def get_task(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    task = (
+        db.query(Task)
+        .options(selectinload(Task.sub_tasks))
+        .filter(Task.pk_tasks == task_id)
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail='任务不存在')
+    if task.fk_users != current_user.pk_users:
+        owner = db.query(User).filter(User.pk_users == task.fk_users).first()
+        if not owner or owner.fk_users_parent != current_user.pk_users:
+            raise HTTPException(status_code=403, detail='无权操作')
+    return task
 
 
 @router.post('/{task_id}/complete')
@@ -48,11 +70,16 @@ def complete_task(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    task = db.query(Task).filter(
-        Task.pk_tasks == task_id,
-        Task.fk_users == current_user.pk_users,
-        Task.status == 'pending',
-    ).first()
+    task = (
+        db.query(Task)
+        .options(selectinload(Task.sub_tasks))
+        .filter(
+            Task.pk_tasks == task_id,
+            Task.fk_users == current_user.pk_users,
+            Task.status == 'pending',
+        )
+        .first()
+    )
     if not task:
         raise HTTPException(status_code=404, detail='任务不存在或已完成')
     task.status = 'completed'
@@ -144,5 +171,96 @@ def delete_task(
         if not owner or owner.fk_users_parent != current_user.pk_users:
             raise HTTPException(status_code=403, detail='无权操作')
     db.delete(task)
+    db.commit()
+    return {'success': True}
+
+
+@router.post('/{task_id}/subtasks', response_model=SubTaskOut, status_code=201)
+def add_subtask(
+    task_id: int,
+    title: str,
+    type: str | None = None,
+    week_day: str | None = None,
+    sort_order: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """给任务添加子任务（type 默认继承主任务类别，week_day: weekday/weekend 区分平时和周末）"""
+    task = db.query(Task).filter(Task.pk_tasks == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail='任务不存在')
+    if task.fk_users != current_user.pk_users:
+        owner = db.query(User).filter(User.pk_users == task.fk_users).first()
+        if not owner or owner.fk_users_parent != current_user.pk_users:
+            raise HTTPException(status_code=403, detail='无权操作')
+    subtask = SubTask(
+        fk_tasks=task_id,
+        title=title,
+        type=type or task.type,
+        week_day=week_day,
+        sort_order=sort_order,
+    )
+    db.add(subtask)
+    db.commit()
+    db.refresh(subtask)
+    return subtask
+
+
+@router.put('/{task_id}/subtasks/{subtask_id}', response_model=SubTaskOut)
+def update_subtask(
+    task_id: int,
+    subtask_id: int,
+    title: str | None = None,
+    type: str | None = None,
+    week_day: str | None = None,
+    sort_order: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """更新子任务"""
+    subtask = db.query(SubTask).filter(
+        SubTask.pk_sub_tasks == subtask_id,
+        SubTask.fk_tasks == task_id,
+    ).first()
+    if not subtask:
+        raise HTTPException(status_code=404, detail='子任务不存在')
+    task = db.query(Task).filter(Task.pk_tasks == task_id).first()
+    if task.fk_users != current_user.pk_users:
+        owner = db.query(User).filter(User.pk_users == task.fk_users).first()
+        if not owner or owner.fk_users_parent != current_user.pk_users:
+            raise HTTPException(status_code=403, detail='无权操作')
+    if title is not None:
+        subtask.title = title
+    if type is not None:
+        subtask.type = type
+    if week_day is not None:
+        subtask.week_day = week_day
+    if sort_order is not None:
+        subtask.sort_order = sort_order
+    db.commit()
+    db.refresh(subtask)
+    return subtask
+
+
+@router.delete('/{task_id}/subtasks/{subtask_id}')
+def delete_subtask(
+    task_id: int,
+    subtask_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """删除子任务"""
+    subtask = db.query(SubTask).filter(
+        SubTask.pk_sub_tasks == subtask_id,
+        SubTask.fk_tasks == task_id,
+    ).first()
+    if not subtask:
+        raise HTTPException(status_code=404, detail='子任务不存在')
+    task = db.query(Task).filter(Task.pk_tasks == task_id).first()
+    if task.fk_users != current_user.pk_users:
+        owner = db.query(User).filter(User.pk_users == task.fk_users).first()
+        if not owner or owner.fk_users_parent != current_user.pk_users:
+            raise HTTPException(status_code=403, detail='无权操作')
+    db.delete(subtask)
     db.commit()
     return {'success': True}

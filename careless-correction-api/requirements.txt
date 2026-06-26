@@ -9,4 +9,5 @@ python-dotenv==1.0.1
 pydantic==2.10.3
 pydantic-settings==2.7.0
 httpx==0.28.1
+pypinyin==0.55.0
 passlib[bcrypt]==1.7.4

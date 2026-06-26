@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { subjectOptions } from '../../utils/constants'
+import { getMistakeCategoryIcon, getMistakeCategoryLabel, MISTAKE_CATEGORIES, subjectOptions } from '../../utils/constants'
 import { useMistakeStore } from '../../stores'
 import { api } from '../../utils/api'
 
 const mistakeStore = useMistakeStore()
 const subject = ref(subjectOptions[0])
 const subjectTag = ref('')
+const category = ref<string>('')
 const imageName = ref('')
 const imageFile = ref<File | null>(null)
 const saved = ref(false)
@@ -33,10 +34,13 @@ async function saveRecord() {
       subject: subject.value,
       imageUrl,
       subjectTag: subjectTag.value || undefined,
+      category: (category.value || undefined) as any,
+      isCarelessness: !!category.value,
     })
     imageName.value = ''
     imageFile.value = null
     subjectTag.value = ''
+    category.value = ''
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
   } catch (e) {
@@ -45,10 +49,13 @@ async function saveRecord() {
       subject: subject.value,
       imageUrl: imageName.value,
       subjectTag: subjectTag.value || undefined,
+      category: (category.value || undefined) as any,
+      isCarelessness: !!category.value,
     })
     imageName.value = ''
     imageFile.value = null
     subjectTag.value = ''
+    category.value = ''
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
   } finally {
@@ -112,6 +119,21 @@ function removeRecord(id: string) {
           </select>
         </label>
         <label style="display:block;margin-top:12px;font-weight:800">
+          粗心类型（可选）
+          <div class="category-grid" style="margin-top:6px">
+            <button
+              v-for="cat in MISTAKE_CATEGORIES"
+              :key="cat.value"
+              class="cat-btn"
+              :class="{ active: category === cat.value }"
+              @click="category = category === cat.value ? '' : cat.value"
+            >
+              <span class="cat-icon">{{ cat.icon }}</span>
+              <span class="cat-label">{{ cat.label }}</span>
+            </button>
+          </div>
+        </label>
+        <label style="display:block;margin-top:12px;font-weight:800">
           知识点标签（可选）
           <input
             v-model="subjectTag"
@@ -142,12 +164,18 @@ function removeRecord(id: string) {
             class="list-row"
           >
             <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
-              <span style="font-size:28px;flex-shrink:0">📸</span>
+              <span style="font-size:28px;flex-shrink:0">{{ getMistakeCategoryIcon(record.category || '') }}</span>
               <div style="min-width:0">
                 <strong>{{ record.subject }}</strong>
-                <span v-if="record.subjectTag" class="muted" style="display:block;font-size:13px">
-                  {{ record.subjectTag }}
-                </span>
+                <div v-if="record.category || record.subjectTag" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:2px">
+                  <span v-if="record.category" class="mini-cat-tag">
+                    {{ getMistakeCategoryLabel(record.category) }}
+                  </span>
+                  <span v-if="record.subjectTag" class="muted" style="font-size:13px">
+                    {{ record.subjectTag }}
+                  </span>
+                </div>
+                <span v-if="record.isCarelessness === false" class="muted" style="font-size:12px">知识漏洞</span>
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
@@ -197,6 +225,53 @@ function removeRecord(id: string) {
 }
 .photo-drop input {
   display: none;
+}
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.cat-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  border-radius: 14px;
+  border: 2px solid var(--line);
+  background: #fff;
+  cursor: pointer;
+  transition: all .12s ease;
+  font: inherit;
+}
+.cat-btn:hover {
+  border-color: var(--primary-2);
+  background: #f6fddc;
+}
+.cat-btn.active {
+  border-color: var(--primary);
+  background: #ecffd9;
+  box-shadow: 0 2px 8px rgba(16,110,0,.15);
+}
+.cat-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+.cat-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  text-align: center;
+}
+.mini-cat-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #d9f5c8;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
 }
 button:disabled {
   opacity: .5;

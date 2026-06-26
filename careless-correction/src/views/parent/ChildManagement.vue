@@ -173,6 +173,10 @@ onMounted(loadChildren)
                 </span>
               </div>
             </div>
+            <div class="child-login-col" v-if="child.loginName">
+              <span class="login-label">登录名</span>
+              <span class="login-value">{{ child.loginName }}</span>
+            </div>
             <div class="child-actions">
               <button
                 class="btn"
@@ -229,6 +233,30 @@ onMounted(loadChildren)
   font-size: 20px;
   font-weight: 900;
   flex-shrink: 0;
+}
+.child-login-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 16px;
+  background: #e8f5e9;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+.login-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #558b2f;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.login-value {
+  font-size: 18px;
+  font-weight: 900;
+  color: #1b5e20;
+  font-family: 'Courier New', 'SF Mono', monospace;
+  letter-spacing: 1px;
 }
 .child-actions {
   display: flex;

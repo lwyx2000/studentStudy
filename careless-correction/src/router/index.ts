@@ -79,8 +79,8 @@ const routes = [
   },
   {
     path: '/parent/tasks',
-    name: 'TaskManagement',
-    component: () => import('../views/parent/TaskManagement.vue'),
+    name: 'TaskHabitManager',
+    component: () => import('../views/parent/TaskHabitManager.vue'),
     meta: { parentOnly: true },
   },
   {
@@ -99,12 +99,6 @@ const routes = [
     path: '/parent/sunlight',
     name: 'SunlightManagement',
     component: () => import('../views/parent/SunlightManagement.vue'),
-    meta: { parentOnly: true },
-  },
-  {
-    path: '/parent/habits',
-    name: 'HabitManagement',
-    component: () => import('../views/parent/HabitManagement.vue'),
     meta: { parentOnly: true },
   },
   {

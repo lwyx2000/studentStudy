@@ -99,14 +99,14 @@ async function testConnection() {
         <div class="card-title">
           <h2>错题分析 Prompt</h2>
         </div>
-        <textarea v-model="form.mistakePrompt" class="input" rows="8" style="resize:vertical;font-size:13px;line-height:1.6"></textarea>
+        <textarea v-model="form.mistakePrompt" class="input" rows="8" style="resize:vertical;font-size:15px;line-height:1.7"></textarea>
       </div>
 
       <div class="panel">
         <div class="card-title">
           <h2>成长评估 Prompt</h2>
         </div>
-        <textarea v-model="form.assessmentPrompt" class="input" rows="8" style="resize:vertical;font-size:13px;line-height:1.6"></textarea>
+        <textarea v-model="form.assessmentPrompt" class="input" rows="8" style="resize:vertical;font-size:15px;line-height:1.7"></textarea>
 
         <label style="font-weight:800;display:block;margin-top:16px;margin-bottom:4px">评估周期</label>
         <select v-model="form.assessmentCron" class="input">

@@ -1,10 +1,32 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pypinyin import lazy_pinyin
 from sqlalchemy.orm import Session
 
-from app.auth import create_access_token, get_current_user, require_parent
+from app.auth import create_access_token, get_current_user, hash_password, require_parent
 from app.database import get_db
 from app.models import User
 from app.schemas import ChildOut, TokenOut
+
+
+DEFAULT_CHILD_PASSWORD = 'qwe123'
+
+
+def _make_login_name(name: str) -> str:
+    return ''.join([word[0].lower() for word in lazy_pinyin(name)])
+
+
+def _generate_unique_login_name(name: str, db: Session) -> str:
+    base = _make_login_name(name)
+    existing = db.query(User.login_name).filter(
+        User.login_name.like(f'{base}%')
+    ).all()
+    used = {row[0] for row in existing if row[0]}
+    if base not in used:
+        return base
+    suffix = 1
+    while f'{base}{suffix}' in used:
+        suffix += 1
+    return f'{base}{suffix}'
 
 router = APIRouter()
 
@@ -39,7 +61,9 @@ def add_child(
         raise HTTPException(status_code=409, detail='已存在同名孩子')
     child = User(
         name=name,
+        login_name=_generate_unique_login_name(name, db),
         role='child',
+        password_hash=hash_password(DEFAULT_CHILD_PASSWORD),
         grade=grade,
         fk_users_parent=current_user.pk_users,
     )

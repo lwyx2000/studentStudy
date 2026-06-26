@@ -285,11 +285,16 @@ export const useTaskStore = defineStore('task', () => {
 
   function updateCurrentHabit(data: Partial<HabitSOP>) {
     Object.assign(currentWeekHabit.value, data)
-    api.habits.updateCurrent({ title: data.title, weekNumber: data.weekNumber }).catch(() => {})
+    api.habits.updateCurrent({
+      title: data.title,
+      weekNumber: data.weekNumber,
+      steps: currentWeekHabit.value.steps.map(s => ({ instruction: s.instruction, order: s.order })),
+    }).catch((e) => console.warn('更新习惯同步失败', e))
   }
 
   function setHabitSteps(steps: SOPStep[]) {
     currentWeekHabit.value.steps = steps.map((s, i) => ({ ...s, order: i + 1 }))
+    syncStepsToBackend()
   }
 
   function addStepToHabit(instruction: string) {
@@ -297,12 +302,22 @@ export const useTaskStore = defineStore('task', () => {
       order: currentWeekHabit.value.steps.length + 1,
       instruction,
     })
+    syncStepsToBackend()
   }
 
   function removeHabitStep(index: number) {
     currentWeekHabit.value.steps = currentWeekHabit.value.steps
       .filter((_, i) => i !== index)
       .map((s, i) => ({ ...s, order: i + 1 }))
+    syncStepsToBackend()
+  }
+
+  function syncStepsToBackend() {
+    const habitId = currentWeekHabit.value.id
+    if (/^\d+$/.test(habitId)) {
+      api.habits.updateCurrent({ steps: currentWeekHabit.value.steps.map(s => ({ instruction: s.instruction, order: s.order })) })
+        .catch((e) => console.warn('同步步骤失败', e))
+    }
   }
 
   function archiveCurrentHabit() {
@@ -312,22 +327,37 @@ export const useTaskStore = defineStore('task', () => {
 
   function createNewHabit(title: string) {
     archiveCurrentHabit()
+    const nextWeek = currentWeekHabit.value.weekNumber + 1
     const next: HabitSOP = {
       id: `habit-${Date.now()}`,
       title,
-      weekNumber: currentWeekHabit.value.weekNumber + 1,
+      weekNumber: nextWeek,
       steps: [],
     }
     currentWeekHabit.value = next
-    api.habits.create({ title }).then((res: any) => {
-      if (res?.habit?.pk_habit_sops) next.id = String(res.habit.pk_habit_sops)
-    }).catch(() => {})
+    api.habits.create({ title, weekNumber: nextWeek }).then((res: any) => {
+      if (res?.habit?.pk_habit_sops) {
+        next.id = String(res.habit.pk_habit_sops)
+      }
+    }).catch((e) => console.warn('创建习惯同步失败', e))
     return next
   }
 
-  function loadHabitFromHistory(id: string) {
-    const habit = habitHistory.value.find(h => h.id === id)
-    if (habit) currentWeekHabit.value = { ...habit }
+  async function loadHabitFromHistory(id: string) {
+    const local = habitHistory.value.find(h => h.id === id)
+    if (/^\d+$/.test(id)) {
+      try {
+        const res = await api.habits.getDetail(id)
+        if (res?.habit) {
+          const habit = normalizeHabit(res.habit)
+          currentWeekHabit.value = habit
+          const existing = habitHistory.value.find(h => h.id === id)
+          if (existing) Object.assign(existing, habit)
+          return
+        }
+      } catch { /* fallback to local */ }
+    }
+    if (local) currentWeekHabit.value = { ...local }
   }
 
   return {

@@ -7,12 +7,15 @@ const mistakeStore = useMistakeStore()
 const period = ref('学年')
 const reportReady = ref(false)
 const latest = computed(() => growthStore.trendData[growthStore.trendData.length - 1])
-const spiderMetrics = computed(() => [
-  { label: '专注', value: 76 },
-  { label: '整洁', value: Math.max(35, 90 - growthStore.highFrequencyItems.length * 18) },
-  { label: '元认知', value: 68 + Math.min(20, mistakeStore.records.length * 2) },
-  { label: '情绪', value: 72 },
-])
+const spiderMetrics = computed(() => {
+  const latest = growthStore.trendData[growthStore.trendData.length - 1]
+  return [
+    { label: '专注', value: latest?.focusScore ?? 76 },
+    { label: '整洁', value: latest?.neatnessScore ?? Math.max(35, 90 - growthStore.highFrequencyItems.length * 18) },
+    { label: '元认知', value: latest?.metacognitionScore ?? 68 + Math.min(20, mistakeStore.records.length * 2) },
+    { label: '情绪', value: latest?.emotionScore ?? 72 },
+  ]
+})
 </script>
 
 <template>

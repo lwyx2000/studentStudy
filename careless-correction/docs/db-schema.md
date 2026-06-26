@@ -14,6 +14,7 @@
 ```
 t_users ──1:N── t_assessments
 t_users ──1:N── t_tasks
+t_tasks  ──1:N── t_sub_tasks
 t_users ──1:N── t_mistake_records
 t_users ──1:N── t_item_loss_records
 t_users ──1:N── t_item_storage_records
@@ -38,7 +39,9 @@ t_articles ──1:N── t_article_bookmarks
 |------|------|------|------|
 | pk_users | UUID | PK | 主键 |
 | name | VARCHAR(50) | NOT NULL | 用户名(孩子或家长昵称) |
+| login_name | VARCHAR(50) | UNIQUE, NULL | 登录名(孩子的拼音首字母) |
 | role | VARCHAR(10) | NOT NULL, CHECK IN ('child','parent') | 角色 |
+| password_hash | VARCHAR(255) | NULL | 密码哈希(家长/孩子均有) |
 | grade | SMALLINT | NULL, CHECK 1-6 | 物理年级(仅child) |
 | avatar_url | VARCHAR(255) | NULL | 头像URL |
 | fk_users_parent | UUID | FK -> t_users.pk_users, NULL | 关联家长(仅child) |
@@ -94,7 +97,25 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 4. t_habit_sops - 习惯标准操作程序表
+## 4. t_sub_tasks - 子任务表
+
+> 添加日期: 2026-06-17
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| pk_sub_tasks | INT | PK, AUTO_INCREMENT | 主键 |
+| fk_tasks | INT | FK -> t_tasks.pk_tasks, NOT NULL, ON DELETE CASCADE | 关联任务 |
+| title | VARCHAR(100) | NOT NULL | 子任务标题 |
+| type | VARCHAR(20) | NOT NULL | 子任务类别(morning_routine/study_habit/life_skill/exercise/reflection) |
+| week_day | VARCHAR(10) | NULL | 适用日: weekday=平时, weekend=周末, NULL=全部 |
+| sort_order | TINYINT | DEFAULT 0 | 排序序号 |
+| created_at | TIMESTAMP | DEFAULT NOW() | 创建时间 |
+
+用于区分平时和周末的子任务。任务打印时选中任务即选中所有子任务。
+
+---
+
+## 5. t_habit_sops - 习惯标准操作程序表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -107,7 +128,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 5. t_sop_steps - SOP步骤表
+## 6. t_sop_steps - SOP步骤表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -120,7 +141,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 6. t_mistake_records - 错题记录表
+## 7. t_mistake_records - 错题记录表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -158,7 +179,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 7. t_mistake_reviews - 错题复习记录表
+## 8. t_mistake_reviews - 错题复习记录表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -171,7 +192,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 8. t_item_storage_records - 物品收纳记录表
+## 9. t_item_storage_records - 物品收纳记录表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -185,7 +206,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 9. t_item_loss_records - 物品丢失记录表
+## 10. t_item_loss_records - 物品丢失记录表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -204,7 +225,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 10. t_reward_items - 阳光值兑换物品表
+## 11. t_reward_items - 阳光值兑换物品表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -218,7 +239,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 11. t_sunlight_history - 阳光值变动记录表
+## 12. t_sunlight_history - 阳光值变动记录表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -233,7 +254,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 12. t_llm_config - 大模型配置表
+## 13. t_llm_config - 大模型配置表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -250,7 +271,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 13. t_growth_snapshots - 成长数据快照表
+## 14. t_growth_snapshots - 成长数据快照表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -270,7 +291,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 14. t_diagnostic_alerts - 诊断预警表
+## 15. t_diagnostic_alerts - 诊断预警表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -289,7 +310,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 15. t_badges - 勋章定义表
+## 16. t_badges - 勋章定义表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -305,7 +326,7 @@ t_articles ──1:N── t_article_bookmarks
 
 ---
 
-## 16. t_badge_unlocks - 勋章解锁记录表
+## 17. t_badge_unlocks - 勋章解锁记录表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -318,7 +339,7 @@ UNIQUE(fk_users, fk_badges)
 
 ---
 
-## 17. t_covenants - 成长契约表
+## 18. t_covenants - 成长契约表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -335,7 +356,7 @@ UNIQUE(fk_users, fk_badges)
 
 ---
 
-## 18. t_covenant_signatures - 契约签署表
+## 19. t_covenant_signatures - 契约签署表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -350,7 +371,7 @@ UNIQUE(fk_covenants, signer_role)
 
 ---
 
-## 19. t_parent_settings - 家长设置表
+## 20. t_parent_settings - 家长设置表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -366,7 +387,7 @@ UNIQUE(fk_covenants, signer_role)
 
 ---
 
-## 20. t_community_posts - 社区帖子表
+## 21. t_community_posts - 社区帖子表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -385,7 +406,7 @@ UNIQUE(fk_covenants, signer_role)
 
 ---
 
-## 21. t_post_replies - 帖子回复表
+## 22. t_post_replies - 帖子回复表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -398,7 +419,7 @@ UNIQUE(fk_covenants, signer_role)
 
 ---
 
-## 22. t_articles - 循证资源表
+## 23. t_articles - 循证资源表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -417,7 +438,7 @@ UNIQUE(fk_covenants, signer_role)
 
 ---
 
-## 23. t_article_bookmarks - 文章收藏表
+## 24. t_article_bookmarks - 文章收藏表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -430,7 +451,7 @@ UNIQUE(fk_users, fk_articles)
 
 ---
 
-## 24. t_shared_covenants - 共享契约表(社区)
+## 25. t_shared_covenants - 共享契约表(社区)
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -441,7 +462,7 @@ UNIQUE(fk_users, fk_articles)
 
 ---
 
-## 25. t_growth_reports - 生成报告表
+## 26. t_growth_reports - 生成报告表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
@@ -454,7 +475,7 @@ UNIQUE(fk_users, fk_articles)
 
 ---
 
-## 26. t_task_weekly_progress - 每周打卡进度表
+## 27. t_task_weekly_progress - 每周打卡进度表
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|

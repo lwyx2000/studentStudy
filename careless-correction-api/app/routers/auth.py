@@ -33,8 +33,11 @@ def login(
     password: str,
     db: Session = Depends(get_db),
 ):
-    """家长登录"""
-    user = db.query(User).filter(User.name == name, User.role == 'parent').first()
+    """登录（家长用name，孩子用login_name）"""
+    user = (
+        db.query(User).filter(User.name == name, User.role == 'parent').first()
+        or db.query(User).filter(User.login_name == name, User.role == 'child').first()
+    )
     if not user or not user.password_hash or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail='用户名或密码错误')
     token = create_access_token(user.pk_users, user.role)
@@ -62,6 +65,21 @@ def child_login(
 @router.get('/session', response_model=UserOut)
 def get_session(current_user: User = Depends(get_current_user)):
     return UserOut.model_validate(current_user)
+
+
+@router.put('/password')
+def change_password(
+    old_password: str,
+    new_password: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """修改密码（家长和孩子均可使用）"""
+    if not current_user.password_hash or not verify_password(old_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail='原密码错误')
+    current_user.password_hash = hash_password(new_password)
+    db.commit()
+    return {'success': True}
 
 
 @router.put('/profile', response_model=UserOut)

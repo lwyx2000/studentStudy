@@ -1,7 +1,7 @@
 import type {
   BadgeItem, DiagnosticAlert, DiscussionPost, FamilyCovenant,
   GrowthDataPoint, HabitSOP, ItemLossRecord, ItemStorageRecord, LlmConfig,
-  MistakeRecord, ParentSettings, RewardItem, SunlightRecord, TaskItem, UserProfile,
+  MistakeRecord, ParentSettings, RewardItem, SubTaskItem, SunlightRecord, TaskItem, UserProfile,
 } from '../types'
 
 const API_BASE = '/api/v1'
@@ -45,15 +45,21 @@ export function normalizeUser(u: any): UserProfile {
   return {
     id: String(u.pk_users ?? u.id ?? ''),
     name: u.name ?? '',
+    loginName: u.login_name ?? u.loginName,
     grade: u.grade ?? 3,
     avatarUrl: u.avatar_url ?? u.avatarUrl ?? '',
     role: u.role ?? 'child',
+    parentId: u.fk_users_parent ?? u.parentId,
+    sunlightPoints: u.sunlight_points ?? u.sunlightPoints,
+    streakDays: u.streak_days ?? u.streakDays,
+    isOnboarded: u.is_onboarded ?? u.isOnboarded,
   }
 }
 
 export interface ChildProfile {
   id: string
   name: string
+  loginName?: string
   grade: number
   avatarUrl: string
   sunlightPoints: number
@@ -65,11 +71,22 @@ export function normalizeChild(c: any): ChildProfile {
   return {
     id: String(c.pk_users ?? c.id ?? ''),
     name: c.name ?? '',
+    loginName: c.login_name ?? c.loginName,
     grade: c.grade ?? 3,
     avatarUrl: c.avatar_url ?? c.avatarUrl ?? '',
     sunlightPoints: c.sunlight_points ?? 0,
     streakDays: c.streak_days ?? 0,
     isOnboarded: c.is_onboarded ?? false,
+  }
+}
+
+export function normalizeSubTask(s: any): SubTaskItem {
+  return {
+    id: String(s.pk_sub_tasks ?? s.id ?? ''),
+    title: s.title ?? '',
+    type: s.type ?? undefined,
+    weekDay: s.week_day ?? s.weekDay,
+    sortOrder: s.sort_order ?? s.sortOrder ?? 0,
   }
 }
 
@@ -82,6 +99,12 @@ export function normalizeTask(t: any): TaskItem {
     status: t.status ?? 'pending',
     rewardPoints: t.reward_points ?? t.rewardPoints ?? 10,
     icon: t.icon ?? '📋',
+    weekDay: t.week_day ?? t.weekDay,
+    assignedDate: t.assigned_date ?? t.assignedDate,
+    completedAt: t.completed_at ?? t.completedAt,
+    completionPhotoUrl: t.completion_photo_url ?? t.completionPhotoUrl,
+    habitSopId: t.fk_habit_sops ?? t.habitSopId,
+    subTasks: Array.isArray(t.sub_tasks ?? t.subTasks) ? (t.sub_tasks ?? t.subTasks).map(normalizeSubTask) : undefined,
   }
 }
 
@@ -90,8 +113,18 @@ export function normalizeMistake(r: any): MistakeRecord {
     id: String(r.pk_mistake_records ?? r.id ?? ''),
     subject: r.subject ?? '',
     imageUrl: r.image_url ?? r.imageUrl ?? '',
-    subjectTag: r.knowledge_point ?? r.category ?? r.subjectTag,
+    subjectTag: r.subject_tag ?? r.subjectTag ?? r.knowledge_point,
     createdAt: r.created_at ?? r.createdAt ?? new Date().toISOString(),
+    isCarelessness: r.is_carelessness ?? r.isCarelessness,
+    category: r.category as MistakeCategory | undefined,
+    knowledgePoint: r.knowledge_point ?? r.knowledgePoint,
+    recognizedText: r.recognized_text ?? r.recognizedText,
+    grade: r.grade,
+    curriculumChapter: r.curriculum_chapter ?? r.curriculumChapter,
+    reviewStrategy: r.review_strategy ?? r.reviewStrategy,
+    nextReviewAt: r.next_review_at ?? r.nextReviewAt,
+    reviewCount: r.review_count ?? r.reviewCount,
+    resolved: r.resolved,
   }
 }
 
@@ -159,6 +192,9 @@ export function normalizeCovenant(c: any): FamilyCovenant {
     parentSignature: c.parent_signature ?? c.parentSignature ?? '',
     createdAt: c.created_at ?? c.createdAt ?? new Date().toISOString(),
     status: c.status ?? 'active',
+    rewardType: c.reward_type ?? c.rewardType,
+    nudgeMessage: c.nudge_message ?? c.nudgeMessage,
+    completedAt: c.completed_at ?? c.completedAt,
   }
 }
 
@@ -168,6 +204,11 @@ export function normalizeGrowthPoint(s: any): GrowthDataPoint {
     mistakeRate: Number(s.mistake_rate ?? s.mistakeRate ?? 0),
     itemLossRate: Number(s.item_loss_rate ?? s.itemLossRate ?? 0),
     taskCompletionRate: Number(s.task_completion_rate ?? s.taskCompletionRate ?? 0),
+    focusScore: s.focus_score ?? s.focusScore,
+    neatnessScore: s.neatness_score ?? s.neatnessScore,
+    metacognitionScore: s.metacognition_score ?? s.metacognitionScore,
+    emotionScore: s.emotion_score ?? s.emotionScore,
+    source: s.source,
   }
 }
 
@@ -179,6 +220,9 @@ export function normalizeAlert(a: any): DiagnosticAlert {
     suggestion: a.suggestion ?? '',
     severity: a.severity ?? 'info',
     createdAt: a.created_at ?? a.createdAt ?? new Date().toISOString(),
+    relatedMetric: a.related_metric ?? a.relatedMetric,
+    metricChange: a.metric_change ?? a.metricChange,
+    isRead: a.is_read ?? a.isRead,
   }
 }
 
@@ -215,6 +259,7 @@ export function normalizeParentSettings(s: any): ParentSettings {
     achievementNotification: s.achievement_notification ?? s.achievementNotification ?? true,
     weeklyReport: s.weekly_report ?? s.weeklyReport ?? true,
     schoolSync: s.school_sync ?? s.schoolSync ?? false,
+    schoolSyncCode: s.school_sync_code ?? s.schoolSyncCode,
   }
 }
 
@@ -248,6 +293,8 @@ export const api = {
       if (data.avatarUrl) params.set('avatar_url', data.avatarUrl)
       return request<any>(`/auth/profile?${params}`, { method: 'PUT' })
     },
+    changePassword: (oldPassword: string, newPassword: string) =>
+      request<{ success: boolean }>(`/auth/password?old_password=${encodeURIComponent(oldPassword)}&new_password=${encodeURIComponent(newPassword)}`, { method: 'PUT' }),
   },
 
   children: {
@@ -270,6 +317,8 @@ export const api = {
   tasks: {
     getToday: (childId?: string) =>
       request<any>(`/tasks/today${childId ? `?child_id=${childId}` : ''}`),
+    getTask: (taskId: string) =>
+      request<any>(`/tasks/${taskId}`),
     complete: (taskId: string) =>
       request<any>(`/tasks/${taskId}/complete`, { method: 'POST' }),
     checkin: (formData: FormData) =>
@@ -286,24 +335,38 @@ export const api = {
     },
     delete: (taskId: string) =>
       request<any>(`/tasks/${taskId}`, { method: 'DELETE' }),
+    subtasks: {
+      add: (taskId: string, data: { title: string; type?: string; weekDay?: string; sortOrder?: number }) => {
+        const params = new URLSearchParams({ title: data.title })
+        if (data.type) params.set('type', data.type)
+        if (data.weekDay) params.set('week_day', data.weekDay)
+        if (data.sortOrder !== undefined) params.set('sort_order', String(data.sortOrder))
+        return request<any>(`/tasks/${taskId}/subtasks?${params}`, { method: 'POST' })
+      },
+      update: (taskId: string, subtaskId: string, data: { title?: string; type?: string; weekDay?: string; sortOrder?: number }) => {
+        const params = new URLSearchParams()
+        if (data.title) params.set('title', data.title)
+        if (data.type) params.set('type', data.type)
+        if (data.weekDay) params.set('week_day', data.weekDay)
+        if (data.sortOrder !== undefined) params.set('sort_order', String(data.sortOrder))
+        return request<any>(`/tasks/${taskId}/subtasks/${subtaskId}?${params}`, { method: 'PUT' })
+      },
+      remove: (taskId: string, subtaskId: string) =>
+        request<any>(`/tasks/${taskId}/subtasks/${subtaskId}`, { method: 'DELETE' }),
+    },
   },
 
   habits: {
     getCurrent: () =>
       request<any>('/habits/current'),
-    updateCurrent: (data: { title?: string; weekNumber?: number; gradeRange?: string; difficultyLevel?: number }) => {
-      const params = new URLSearchParams()
-      if (data.title) params.set('title', data.title)
-      if (data.weekNumber) params.set('week_number', String(data.weekNumber))
-      return request<any>(`/habits/current?${params}`, { method: 'PUT' })
-    },
-    create: (data: { title: string; weekNumber?: number; gradeRange?: string; difficultyLevel?: number }) => {
-      const params = new URLSearchParams({ title: data.title })
-      if (data.weekNumber) params.set('week_number', String(data.weekNumber))
-      return request<any>(`/habits/?${params}`, { method: 'POST' })
-    },
+    updateCurrent: (data: { title?: string; weekNumber?: number; gradeRange?: string; difficultyLevel?: number; steps?: Array<{ instruction: string; order: number }> }) =>
+      request<any>('/habits/current', { method: 'PUT', body: JSON.stringify(data) }),
+    create: (data: { title: string; weekNumber?: number; gradeRange?: string; difficultyLevel?: number; steps?: Array<{ instruction: string; order: number }> }) =>
+      request<any>('/habits/', { method: 'POST', body: JSON.stringify(data) }),
     getHistory: () =>
       request<any>('/habits/history'),
+    getDetail: (habitId: string) =>
+      request<any>(`/habits/${habitId}`),
   },
 
   mistakes: {

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class UserOut(BaseModel):
     pk_users: int
     name: str
+    login_name: str | None = None
     role: str
     grade: int | None = None
     avatar_url: str | None = None
@@ -20,6 +21,7 @@ class UserOut(BaseModel):
 class ChildOut(BaseModel):
     pk_users: int
     name: str
+    login_name: str | None = None
     grade: int | None = None
     avatar_url: str | None = None
     sunlight_points: int = 0
@@ -34,6 +36,16 @@ class TokenOut(BaseModel):
     user: UserOut
 
 
+class SubTaskOut(BaseModel):
+    pk_sub_tasks: int
+    title: str
+    type: str
+    week_day: str | None = None
+    sort_order: int = 0
+
+    model_config = {'from_attributes': True}
+
+
 class TaskOut(BaseModel):
     pk_tasks: int
     title: str
@@ -45,6 +57,7 @@ class TaskOut(BaseModel):
     assigned_date: date
     completed_at: datetime | None = None
     completion_photo_url: str | None = None
+    sub_tasks: list[SubTaskOut] = []
 
     model_config = {'from_attributes': True}
 

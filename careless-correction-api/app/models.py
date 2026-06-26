@@ -15,6 +15,7 @@ class User(Base):
 
     pk_users: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(50), nullable=False)
+    login_name: Mapped[str | None] = mapped_column(String(50), unique=True)
     role: Mapped[str] = mapped_column(String(10), nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255))
     grade: Mapped[int | None] = mapped_column(TINYINT)
@@ -90,6 +91,20 @@ class Task(Base):
     fk_habit_sops: Mapped[int | None] = mapped_column(Integer, ForeignKey('t_habit_sops.pk_habit_sops'))
 
     user = relationship('User', backref='tasks')
+
+
+class SubTask(Base):
+    __tablename__ = 't_sub_tasks'
+
+    pk_sub_tasks: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fk_tasks: Mapped[int] = mapped_column(Integer, ForeignKey('t_tasks.pk_tasks'), nullable=False)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+    week_day: Mapped[str | None] = mapped_column(String(10))
+    sort_order: Mapped[int] = mapped_column(TINYINT, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    task = relationship('Task', backref='sub_tasks')
 
 
 class MistakeRecord(Base):

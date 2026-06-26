@@ -1,6 +1,10 @@
 import os
 from urllib.parse import quote_plus
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 class DatabaseConfig:
     """数据库配置，优先从环境变量读取，使用默认值兜底"""

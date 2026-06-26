@@ -34,8 +34,8 @@ function createHabit() {
   newHabitTitle.value = ''
 }
 
-function loadHistory(id: string) {
-  taskStore.loadHabitFromHistory(id)
+async function loadHistory(id: string) {
+  await taskStore.loadHabitFromHistory(id)
   editTitle.value = taskStore.currentWeekHabit.title
   editWeek.value = taskStore.currentWeekHabit.weekNumber
 }
