@@ -4,7 +4,6 @@ from sqlalchemy import (
     Boolean, Date, DateTime, DECIMAL, Float, ForeignKey, Integer, JSON,
     SmallInteger, String, Text, UniqueConstraint,
 )
-from sqlalchemy.dialects.mysql import TINYINT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -18,10 +17,11 @@ class User(Base):
     login_name: Mapped[str | None] = mapped_column(String(50), unique=True)
     role: Mapped[str] = mapped_column(String(10), nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255))
-    grade: Mapped[int | None] = mapped_column(TINYINT)
+    grade: Mapped[int | None] = mapped_column(SmallInteger)
     avatar_url: Mapped[str | None] = mapped_column(String(255))
     fk_users_parent: Mapped[int | None] = mapped_column(Integer, ForeignKey('t_users.pk_users'))
     sunlight_points: Mapped[int] = mapped_column(Integer, default=0)
+    apples: Mapped[int] = mapped_column(Integer, default=0)
     streak_days: Mapped[int] = mapped_column(Integer, default=0)
     is_onboarded: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -35,12 +35,12 @@ class Assessment(Base):
 
     pk_assessments: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fk_users: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
-    focus_attention: Mapped[int] = mapped_column(TINYINT, nullable=False)
-    organization: Mapped[int] = mapped_column(TINYINT, nullable=False)
-    emotional_control: Mapped[int] = mapped_column(TINYINT, nullable=False)
-    planning: Mapped[int] = mapped_column(TINYINT, nullable=False)
-    impulse_control: Mapped[int] = mapped_column(TINYINT, nullable=False)
-    recommended_level: Mapped[int] = mapped_column(TINYINT, nullable=False)
+    focus_attention: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    organization: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    emotional_control: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    planning: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    impulse_control: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    recommended_level: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     task_density: Mapped[str] = mapped_column(String(20), nullable=False)
     source: Mapped[str] = mapped_column(String(20), default='initial')
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -53,13 +53,16 @@ class HabitSOP(Base):
 
     pk_habit_sops: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(100), nullable=False)
-    week_number: Mapped[int] = mapped_column(TINYINT, nullable=False)
     grade_range: Mapped[str] = mapped_column(String(10), nullable=False)
-    difficulty_level: Mapped[int] = mapped_column(TINYINT, nullable=False)
+    difficulty_level: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    reward_points: Mapped[int] = mapped_column(SmallInteger, default=5)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    fk_users: Mapped[int | None] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=True)
 
     steps = relationship('SOPStep', backref='habit', cascade='all, delete-orphan')
     tasks = relationship('Task', backref='habit_sop_rel')
+    user = relationship('User', backref='habits')
 
 
 class SOPStep(Base):
@@ -67,7 +70,7 @@ class SOPStep(Base):
 
     pk_sop_steps: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fk_habit_sops: Mapped[int] = mapped_column(Integer, ForeignKey('t_habit_sops.pk_habit_sops'), nullable=False)
-    order: Mapped[int] = mapped_column(TINYINT, nullable=False)
+    order: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
     image_url: Mapped[str | None] = mapped_column(String(255))
     gif_url: Mapped[str | None] = mapped_column(String(255))
@@ -82,13 +85,14 @@ class Task(Base):
     description: Mapped[str | None] = mapped_column(Text)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default='pending')
-    reward_points: Mapped[int] = mapped_column(TINYINT, default=10)
+    reward_points: Mapped[int] = mapped_column(SmallInteger, default=10)
     icon: Mapped[str | None] = mapped_column(String(50))
-    week_day: Mapped[str | None] = mapped_column(String(10))
+    week_day: Mapped[str | None] = mapped_column(String(50))
     assigned_date: Mapped[date] = mapped_column(Date, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
     completion_photo_url: Mapped[str | None] = mapped_column(String(255))
     fk_habit_sops: Mapped[int | None] = mapped_column(Integer, ForeignKey('t_habit_sops.pk_habit_sops'))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     user = relationship('User', backref='tasks')
 
@@ -100,8 +104,8 @@ class SubTask(Base):
     fk_tasks: Mapped[int] = mapped_column(Integer, ForeignKey('t_tasks.pk_tasks'), nullable=False)
     title: Mapped[str] = mapped_column(String(100), nullable=False)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
-    week_day: Mapped[str | None] = mapped_column(String(10))
-    sort_order: Mapped[int] = mapped_column(TINYINT, default=0)
+    week_day: Mapped[str | None] = mapped_column(String(50))
+    sort_order: Mapped[int] = mapped_column(SmallInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     task = relationship('Task', backref='sub_tasks')
@@ -118,11 +122,11 @@ class MistakeRecord(Base):
     is_carelessness: Mapped[bool] = mapped_column(Boolean, default=True)
     category: Mapped[str | None] = mapped_column(String(30))
     knowledge_point: Mapped[str | None] = mapped_column(String(100))
-    grade: Mapped[int | None] = mapped_column(TINYINT)
+    grade: Mapped[int | None] = mapped_column(SmallInteger)
     curriculum_chapter: Mapped[str | None] = mapped_column(String(100))
     review_strategy: Mapped[str] = mapped_column(String(30), default='3day-repeat')
     next_review_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now() + timedelta(days=3))
-    review_count: Mapped[int] = mapped_column(TINYINT, default=0)
+    review_count: Mapped[int] = mapped_column(SmallInteger, default=0)
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
@@ -136,7 +140,7 @@ class MistakeReview(Base):
     pk_mistake_reviews: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fk_mistake_records: Mapped[int] = mapped_column(Integer, ForeignKey('t_mistake_records.pk_mistake_records'), nullable=False)
     can_resolve_now: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    confidence_level: Mapped[int | None] = mapped_column(TINYINT)
+    confidence_level: Mapped[int | None] = mapped_column(SmallInteger)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     next_review_at: Mapped[datetime | None] = mapped_column(DateTime)
 
@@ -164,7 +168,7 @@ class ItemLossRecord(Base):
     lost_location: Mapped[str] = mapped_column(String(30), nullable=False)
     estimated_cost: Mapped[float] = mapped_column(DECIMAL(10, 2), default=0)
     lost_date: Mapped[date] = mapped_column(Date, nullable=False, default=date.today)
-    frequency_30d: Mapped[int] = mapped_column(TINYINT, default=1)
+    frequency_30d: Mapped[int] = mapped_column(SmallInteger, default=1)
     is_high_frequency: Mapped[bool] = mapped_column(Boolean, default=False)
     suggestion: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -179,7 +183,7 @@ class RewardItem(Base):
     fk_users: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
-    cost: Mapped[int] = mapped_column(TINYINT, nullable=False)
+    cost: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     icon: Mapped[str | None] = mapped_column(String(20))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -197,6 +201,22 @@ class SunlightHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     user = relationship('User', backref='sunlight_history')
+
+
+class CheckIn(Base):
+    __tablename__ = 't_check_ins'
+
+    pk_check_ins: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fk_users: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
+    check_date: Mapped[str] = mapped_column(String(20), nullable=False)
+    total_points: Mapped[int] = mapped_column(Integer, default=0)
+    habit_step_count: Mapped[int] = mapped_column(Integer, default=0)
+    task_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default='pending')
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user = relationship('User', backref='check_ins')
 
 
 class LlmConfig(Base):
@@ -223,12 +243,12 @@ class GrowthSnapshot(Base):
     fk_users: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
     mistake_rate: Mapped[float | None] = mapped_column(DECIMAL(5, 4))
-    item_loss_rate: Mapped[int | None] = mapped_column(TINYINT)
+    item_loss_rate: Mapped[int | None] = mapped_column(SmallInteger)
     task_completion_rate: Mapped[float | None] = mapped_column(DECIMAL(5, 4))
-    focus_score: Mapped[int | None] = mapped_column(TINYINT)
-    neatness_score: Mapped[int | None] = mapped_column(TINYINT)
-    metacognition_score: Mapped[int | None] = mapped_column(TINYINT)
-    emotion_score: Mapped[int | None] = mapped_column(TINYINT)
+    focus_score: Mapped[int | None] = mapped_column(SmallInteger)
+    neatness_score: Mapped[int | None] = mapped_column(SmallInteger)
+    metacognition_score: Mapped[int | None] = mapped_column(SmallInteger)
+    emotion_score: Mapped[int | None] = mapped_column(SmallInteger)
     source: Mapped[str] = mapped_column(String(20), default='daily')
 
     user = relationship('User', backref='growth_snapshots')
@@ -266,7 +286,7 @@ class Badge(Base):
     requirement: Mapped[str] = mapped_column(Text, nullable=False)
     requirement_type: Mapped[str] = mapped_column(String(30), nullable=False)
     requirement_value: Mapped[int] = mapped_column(Integer, nullable=False)
-    reward_points: Mapped[int] = mapped_column(TINYINT, default=50)
+    reward_points: Mapped[int] = mapped_column(SmallInteger, default=50)
 
     unlocks = relationship('BadgeUnlock', backref='badge', cascade='all, delete-orphan')
 
@@ -286,48 +306,11 @@ class BadgeUnlock(Base):
     )
 
 
-class Covenant(Base):
-    __tablename__ = 't_covenants'
-
-    pk_covenants: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    fk_users_child: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
-    fk_users_parent: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
-    goal: Mapped[str] = mapped_column(Text, nullable=False)
-    reward: Mapped[str] = mapped_column(String(100), nullable=False)
-    reward_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    nudge_message: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), default='draft')
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
-
-    child = relationship('User', foreign_keys=[fk_users_child], backref='covenants_as_child')
-    parent = relationship('User', foreign_keys=[fk_users_parent], backref='covenants_as_parent')
-    signatures = relationship('CovenantSignature', backref='covenant', cascade='all, delete-orphan')
-
-
-class CovenantSignature(Base):
-    __tablename__ = 't_covenant_signatures'
-
-    pk_covenant_signatures: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    fk_covenants: Mapped[int] = mapped_column(Integer, ForeignKey('t_covenants.pk_covenants'), nullable=False)
-    fk_users_signer: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
-    signer_role: Mapped[str] = mapped_column(String(10), nullable=False)
-    signature_data: Mapped[str | None] = mapped_column(Text)
-    signed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-
-    signer = relationship('User', backref='covenant_signatures')
-
-    __table_args__ = (
-        UniqueConstraint('fk_covenants', 'signer_role', name='uq_covenant_signatures'),
-    )
-
-
 class ParentSetting(Base):
     __tablename__ = 't_parent_settings'
 
     pk_parent_settings: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fk_users: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), unique=True, nullable=False)
-    difficulty_level: Mapped[int] = mapped_column(TINYINT, default=2)
     daily_reminder: Mapped[bool] = mapped_column(Boolean, default=True)
     achievement_notification: Mapped[bool] = mapped_column(Boolean, default=True)
     weekly_report: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -336,37 +319,6 @@ class ParentSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     user = relationship('User', backref='parent_settings')
-
-
-class CommunityPost(Base):
-    __tablename__ = 't_community_posts'
-
-    pk_community_posts: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    fk_users_author: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    tags: Mapped[dict | None] = mapped_column(JSON)
-    reply_count: Mapped[int] = mapped_column(TINYINT, default=0)
-    like_count: Mapped[int] = mapped_column(TINYINT, default=0)
-    has_expert_answer: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_anonymous: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-
-    author = relationship('User', backref='posts')
-    replies = relationship('PostReply', backref='post', cascade='all, delete-orphan')
-
-
-class PostReply(Base):
-    __tablename__ = 't_post_replies'
-
-    pk_post_replies: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    fk_community_posts: Mapped[int] = mapped_column(Integer, ForeignKey('t_community_posts.pk_community_posts'), nullable=False)
-    fk_users_author: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    is_expert: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-
-    author = relationship('User', backref='replies')
 
 
 class Article(Base):
@@ -378,7 +330,7 @@ class Article(Base):
     content_url: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[str] = mapped_column(String(30), nullable=False)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
-    reading_time_minutes: Mapped[int | None] = mapped_column(TINYINT)
+    reading_time_minutes: Mapped[int | None] = mapped_column(SmallInteger)
     image_url: Mapped[str | None] = mapped_column(String(255))
     author: Mapped[str | None] = mapped_column(String(100))
     published_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -401,17 +353,6 @@ class ArticleBookmark(Base):
     )
 
 
-class SharedCovenant(Base):
-    __tablename__ = 't_shared_covenants'
-
-    pk_shared_covenants: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    fk_covenants: Mapped[int] = mapped_column(Integer, ForeignKey('t_covenants.pk_covenants'), nullable=False)
-    like_count: Mapped[int] = mapped_column(TINYINT, default=0)
-    shared_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-
-    covenant = relationship('Covenant', backref='shared_covenants')
-
-
 class GrowthReport(Base):
     __tablename__ = 't_growth_reports'
 
@@ -430,10 +371,10 @@ class TaskWeeklyProgress(Base):
 
     pk_task_weekly_progress: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fk_users: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
-    week_number: Mapped[int] = mapped_column(TINYINT, nullable=False)
-    year: Mapped[int] = mapped_column(TINYINT, nullable=False)
-    completed_days: Mapped[int] = mapped_column(TINYINT, default=0)
-    total_days: Mapped[int] = mapped_column(TINYINT, default=7)
+    week_number: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    year: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    completed_days: Mapped[int] = mapped_column(SmallInteger, default=0)
+    total_days: Mapped[int] = mapped_column(SmallInteger, default=7)
     progress_percent: Mapped[float] = mapped_column(DECIMAL(5, 2), default=0)
     fk_habit_sops: Mapped[int | None] = mapped_column(Integer, ForeignKey('t_habit_sops.pk_habit_sops'))
 
@@ -443,3 +384,16 @@ class TaskWeeklyProgress(Base):
     __table_args__ = (
         UniqueConstraint('fk_users', 'year', 'week_number', name='uq_weekly_progress'),
     )
+
+
+class AppleHistory(Base):
+    __tablename__ = 't_apple_history'
+
+    pk_apple_history: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fk_users: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(200), nullable=False)
+    type: Mapped[str] = mapped_column(String(10), nullable=False)  # 'grow' or 'redeem'
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    user = relationship('User', backref='apple_history')

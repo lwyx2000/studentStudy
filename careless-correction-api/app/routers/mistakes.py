@@ -1,11 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import MistakeRecord, User
+from app.models import MistakeRecord, MistakeReview, User
 
 router = APIRouter()
 
@@ -102,6 +102,87 @@ def delete_mistake(
     db.delete(record)
     db.commit()
     return {'success': True}
+
+
+@router.get('/due')
+def get_due_reviews(
+    child_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取到期需要复习的错题"""
+    target = resolve_target(current_user, child_id, db)
+    now = datetime.now()
+    records = (
+        db.query(MistakeRecord)
+        .filter(
+            MistakeRecord.fk_users == target.pk_users,
+            MistakeRecord.resolved == False,
+            MistakeRecord.next_review_at <= now,
+        )
+        .order_by(MistakeRecord.next_review_at)
+        .all()
+    )
+    return {'records': records}
+
+
+# 艾宾浩斯复习间隔（天数）：第1次3天，第2次7天，第3次14天，第4次30天
+def _get_next_review_interval(review_count: int) -> int:
+    intervals = [3, 7, 14, 30]
+    idx = min(review_count, len(intervals) - 1)
+    return intervals[idx]
+
+
+@router.post('/{record_id}/review')
+def review_mistake(
+    record_id: int,
+    can_resolve: bool,
+    confidence_level: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """提交错题复习结果
+    - can_resolve: 孩子认为自己是否能做对
+    - confidence_level: 1-5 信心等级
+    如果 can_resolve=True 且 confidence_level >= 4，标记为已掌握；否则按艾宾浩斯曲线安排下次复习
+    """
+    record = db.query(MistakeRecord).filter(
+        MistakeRecord.pk_mistake_records == record_id,
+    ).first()
+    if not record:
+        raise HTTPException(status_code=404, detail='记录不存在')
+    if record.fk_users != current_user.pk_users:
+        owner = db.query(User).filter(User.pk_users == record.fk_users).first()
+        if not owner or owner.fk_users_parent != current_user.pk_users:
+            raise HTTPException(status_code=403, detail='无权操作')
+
+    now = datetime.now()
+    review_count = record.review_count + 1
+
+    # 判断是否已掌握
+    if can_resolve and (confidence_level is None or confidence_level >= 4):
+        record.resolved = True
+        next_review_at = now + timedelta(days=30)  # 已掌握，30天后最终确认
+    else:
+        # 按艾宾浩斯曲线安排下次复习
+        interval_days = _get_next_review_interval(review_count)
+        next_review_at = now + timedelta(days=interval_days)
+
+    record.review_count = review_count
+    record.next_review_at = next_review_at
+
+    # 创建复习记录
+    review = MistakeReview(
+        fk_mistake_records=record_id,
+        can_resolve_now=can_resolve,
+        confidence_level=confidence_level,
+        reviewed_at=now,
+        next_review_at=next_review_at,
+    )
+    db.add(review)
+    db.commit()
+    db.refresh(record)
+    return {'record': record, 'review': {'can_resolve_now': can_resolve, 'confidence_level': confidence_level, 'next_review_at': next_review_at.isoformat(), 'resolved': record.resolved}}
 
 
 @router.get('/analysis')

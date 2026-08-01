@@ -24,7 +24,6 @@ def get_settings(
 
 @router.put('/settings')
 def update_settings(
-    difficulty_level: int | None = None,
     daily_reminder: bool | None = None,
     achievement_notification: bool | None = None,
     weekly_report: bool | None = None,
@@ -36,8 +35,6 @@ def update_settings(
     if not setting:
         setting = ParentSetting(fk_users=current_user.pk_users)
         db.add(setting)
-    if difficulty_level is not None:
-        setting.difficulty_level = difficulty_level
     if daily_reminder is not None:
         setting.daily_reminder = daily_reminder
     if achievement_notification is not None:

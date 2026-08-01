@@ -1,12 +1,10 @@
 import { defineStore } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import type {
   ArticleResource,
   BadgeItem,
   DiagnosticAlert,
-  DiscussionPost,
   ExecutiveFunctionAssessment,
-  FamilyCovenant,
   GrowthDataPoint,
   HabitSOP,
   ItemLossRecord,
@@ -15,7 +13,6 @@ import type {
   MistakeRecord,
   ParentSettings,
   RewardItem,
-  SOPStep,
   SunlightRecord,
   TaskItem,
   UserProfile,
@@ -23,9 +20,9 @@ import type {
 import {
   api,
   normalizeAlert,
+  normalizeArticle,
   normalizeBadge,
   normalizeChild,
-  normalizeCovenant,
   normalizeGrowthPoint,
   normalizeHabit,
   normalizeItemLoss,
@@ -33,26 +30,11 @@ import {
   normalizeLlmConfig,
   normalizeMistake,
   normalizeParentSettings,
-  normalizePost,
   normalizeRewardItem,
   normalizeSunlightRecord,
   normalizeTask,
   normalizeUser,
 } from '../utils/api'
-
-function loadState<T>(key: string, fallback: T): T {  if (typeof localStorage === 'undefined') return fallback
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback
-  } catch {
-    return fallback
-  }
-}
-
-function persistState(key: string, state: unknown) {
-  if (typeof localStorage === 'undefined') return
-  localStorage.setItem(key, JSON.stringify(state))
-}
 
 
 const defaultProfile: UserProfile = {
@@ -79,52 +61,64 @@ const defaultRewardItems: RewardItem[] = [
   { id: 'ri-4', name: '公园野餐', description: '周末去公园野餐+自由玩耍', cost: 60, icon: '🧺', active: true },
 ]
 
-export const useUserStore = defineStore('user', () => {
-  const saved = loadState('cc-user', {
-    profile: defaultProfile,
-    assessment: defaultAssessment,
-    sunlightPoints: 0,
-    isOnboarded: false,
-    sunlightHistory: [] as SunlightRecord[],
-    rewardItems: defaultRewardItems,
-  })
+export interface AppleRecord {
+  id: string
+  amount: number
+  reason: string
+  type: 'grow' | 'redeem'
+  timestamp: string
+}
 
-  const profile = ref<UserProfile>(saved.profile)
-  const assessment = ref<ExecutiveFunctionAssessment>({ ...defaultAssessment, ...saved.assessment })
-  const sunlightPoints = ref(saved.sunlightPoints)
-  const isOnboarded = ref(saved.isOnboarded)
-  const sunlightHistory = ref<SunlightRecord[]>(saved.sunlightHistory || [])
-  const rewardItems = ref<RewardItem[]>(saved.rewardItems || defaultRewardItems)
+const SUNLIGHT_PER_APPLE = 100
+
+export const useUserStore = defineStore('user', () => {
+  const profile = ref<UserProfile>({ ...defaultProfile })
+  const assessment = ref<ExecutiveFunctionAssessment>({ ...defaultAssessment })
+  const sunlightPoints = ref(0)
+  const isOnboarded = ref(false)
+  const sunlightHistory = ref<SunlightRecord[]>([])
+  const rewardItems = ref<RewardItem[]>([...defaultRewardItems])
+  const apples = ref(0)
+  const appleHistory = ref<AppleRecord[]>([])
 
   const isLowGrade = computed(() => profile.value.grade <= 2)
   const isHighGrade = computed(() => profile.value.grade >= 5)
 
-  watch(
-    () => ({ profile: profile.value, assessment: assessment.value, sunlightPoints: sunlightPoints.value, isOnboarded: isOnboarded.value, sunlightHistory: sunlightHistory.value, rewardItems: rewardItems.value }),
-    value => persistState('cc-user', value),
-    { deep: true },
-  )
-
-  async function fetchFromApi() {
+  async function fetchFromApi(childId?: string) {
     try {
       const user = await api.auth.session()
       const u = normalizeUser(user)
       profile.value = u
       sunlightPoints.value = (user as any).sunlight_points ?? sunlightPoints.value
+      apples.value = (user as any).apples ?? apples.value
     } catch { /* offline */ }
     try {
-      const { balance } = await api.points.getBalance()
+      const { balance } = await api.points.getBalance(childId)
       sunlightPoints.value = balance
     } catch { /* offline */ }
     try {
-      const res = await api.points.getHistory()
+      const res = await api.points.getHistory(childId)
       const raw: any[] = res.history ?? []
       sunlightHistory.value = raw.map(normalizeSunlightRecord)
     } catch { /* offline */ }
     try {
-      const res = await api.points.getRewards()
+      const res = await api.points.getRewards(childId)
       const raw: any[] = res.rewards ?? []
-      if (raw.length) rewardItems.value = raw.map(normalizeRewardItem)
+      rewardItems.value = raw.map(normalizeRewardItem)
+    } catch { /* offline */ }
+    // 加载苹果数据
+    try {
+      const res = await api.points.getApples(childId)
+      apples.value = res.apples
+      sunlightPoints.value = res.sunlightPoints
+      const rawHistory: any[] = res.history ?? []
+      appleHistory.value = rawHistory.map((h: any) => ({
+        id: String(h.pk_apple_history ?? h.id ?? ''),
+        amount: h.amount ?? 0,
+        reason: h.reason ?? '',
+        type: h.type ?? 'grow',
+        timestamp: h.created_at ?? h.timestamp ?? new Date().toISOString(),
+      }))
     } catch { /* offline */ }
   }
 
@@ -142,17 +136,6 @@ export const useUserStore = defineStore('user', () => {
 
   function completeOnboarding() {
     isOnboarded.value = true
-  }
-
-  function addSunlightPoints(pts: number, reason = '任务奖励') {
-    sunlightPoints.value = Math.max(0, sunlightPoints.value + pts)
-    sunlightHistory.value.unshift({
-      id: `sl-${Date.now()}`,
-      amount: pts,
-      reason,
-      type: pts >= 0 ? 'earn' : 'spend',
-      timestamp: new Date().toISOString(),
-    })
   }
 
   function redeemItem(itemId: string) {
@@ -195,6 +178,59 @@ export const useUserStore = defineStore('user', () => {
     api.points.deleteReward(id).catch(() => {})
   }
 
+  const sunlightPerApple = SUNLIGHT_PER_APPLE
+
+  const canGrowApple = computed(() => sunlightPoints.value >= SUNLIGHT_PER_APPLE)
+  const appleYuanValue = computed(() => apples.value)
+
+  function growApple() {
+    if (sunlightPoints.value < SUNLIGHT_PER_APPLE) return false
+    // 乐观更新 UI
+    sunlightPoints.value -= SUNLIGHT_PER_APPLE
+    apples.value += 1
+    appleHistory.value.unshift({
+      id: `ap-${Date.now()}`,
+      amount: 1,
+      reason: '阳光兑换苹果',
+      type: 'grow',
+      timestamp: new Date().toISOString(),
+    })
+    // 调用后端持久化
+    api.points.growApple().then(res => {
+      // 用后端返回的真实数据同步
+      if (res?.apples !== undefined) apples.value = res.apples
+      if (res?.sunlightPoints !== undefined) sunlightPoints.value = res.sunlightPoints
+    }).catch(() => {
+      // 失败时回滚
+      sunlightPoints.value += SUNLIGHT_PER_APPLE
+      apples.value -= 1
+      appleHistory.value.shift()
+    })
+    return true
+  }
+
+  function redeemApple(count: number, reason: string) {
+    if (count <= 0 || apples.value < count) return false
+    // 乐观更新 UI
+    apples.value -= count
+    appleHistory.value.unshift({
+      id: `ap-${Date.now()}`,
+      amount: -count,
+      reason: reason || `兑换 ${count} 元`,
+      type: 'redeem',
+      timestamp: new Date().toISOString(),
+    })
+    // 调用后端持久化
+    api.points.redeemApple(count, reason).then(res => {
+      if (res?.apples !== undefined) apples.value = res.apples
+    }).catch(() => {
+      // 失败时回滚
+      apples.value += count
+      appleHistory.value.shift()
+    })
+    return true
+  }
+
   return {
     profile,
     assessment,
@@ -202,17 +238,23 @@ export const useUserStore = defineStore('user', () => {
     isOnboarded,
     sunlightHistory,
     rewardItems,
+    apples,
+    appleHistory,
+    sunlightPerApple,
+    canGrowApple,
+    appleYuanValue,
     isLowGrade,
     isHighGrade,
     fetchFromApi,
     setProfile,
     setAssessment,
     completeOnboarding,
-    addSunlightPoints,
     redeemItem,
     addRewardItem,
     toggleRewardItem,
     removeRewardItem,
+    growApple,
+    redeemApple,
   }
 })
 
@@ -222,48 +264,21 @@ const seededTasks: TaskItem[] = [
   { id: 'schulte', title: '舒尔特方格', description: '完成 90 秒专注小游戏。', type: 'morning_routine', status: 'pending', rewardPoints: 10, icon: '🧠' },
 ]
 
-const defaultHabit: HabitSOP = {
-  id: 'week-3-read-circle',
-  title: '读题圈号 SOP',
-  weekNumber: 3,
-  steps: [
-    { order: 1, instruction: '手指跟着题干逐字移动，遇到数字停一下。' },
-    { order: 2, instruction: '圈出大题号、单位、运算符号三处关键点。' },
-    { order: 3, instruction: '动笔前复述：题目要我求什么？' },
-  ],
-}
-
 export const useTaskStore = defineStore('task', () => {
-  const saved = loadState('cc-task', {
-    todayTasks: seededTasks,
-    currentWeekHabit: defaultHabit,
-    habitHistory: [] as HabitSOP[],
-  })
-  const todayTasks = ref<TaskItem[]>(saved.todayTasks?.length ? saved.todayTasks : seededTasks)
-  const currentWeekHabit = ref<HabitSOP>(saved.currentWeekHabit || defaultHabit)
-  const habitHistory = ref<HabitSOP[]>(saved.habitHistory || [])
+  const todayTasks = ref<TaskItem[]>([])
+  const habits = ref<HabitSOP[]>([])
   const weeklyProgress = computed(() => todayTasks.value.filter(task => task.status === 'completed').length)
-
-  watch(
-    () => ({ todayTasks: todayTasks.value, currentWeekHabit: currentWeekHabit.value, habitHistory: habitHistory.value }),
-    value => persistState('cc-task', value),
-    { deep: true },
-  )
 
   async function fetchFromApi(childId?: string) {
     try {
       const res = await api.tasks.getToday(childId)
       const raw: any[] = res.tasks ?? []
-      if (raw.length) todayTasks.value = raw.map(normalizeTask)
+      todayTasks.value = raw.map(normalizeTask)
     } catch { /* offline */ }
     try {
-      const res = await api.habits.getCurrent()
-      if (res?.habit) currentWeekHabit.value = normalizeHabit(res.habit)
-    } catch { /* offline */ }
-    try {
-      const res = await api.habits.getHistory()
-      const raw: any[] = res.history ?? []
-      if (raw.length) habitHistory.value = raw.map(normalizeHabit)
+      const res = await api.habits.getAll(childId)
+      const raw: any[] = res.habits ?? []
+      habits.value = raw.map(normalizeHabit)
     } catch { /* offline */ }
   }
 
@@ -271,6 +286,8 @@ export const useTaskStore = defineStore('task', () => {
     const task = todayTasks.value.find(t => t.id === id)
     if (!task || task.status === 'completed') return 0
     task.status = 'completed'
+    // 后端只标记任务完成，不再自动加阳光值
+    // 阳光值由家长审批打卡 (checkins/approve) 后统一发放
     api.tasks.complete(id).catch(() => {})
     return task.rewardPoints
   }
@@ -283,59 +300,50 @@ export const useTaskStore = defineStore('task', () => {
     todayTasks.value = seededTasks.map(task => ({ ...task, status: 'pending' }))
   }
 
-  function updateCurrentHabit(data: Partial<HabitSOP>) {
-    Object.assign(currentWeekHabit.value, data)
-    api.habits.updateCurrent({
-      title: data.title,
-      weekNumber: data.weekNumber,
-      steps: currentWeekHabit.value.steps.map(s => ({ instruction: s.instruction, order: s.order })),
-    }).catch((e) => console.warn('更新习惯同步失败', e))
-  }
-
-  function setHabitSteps(steps: SOPStep[]) {
-    currentWeekHabit.value.steps = steps.map((s, i) => ({ ...s, order: i + 1 }))
-    syncStepsToBackend()
-  }
-
-  function addStepToHabit(instruction: string) {
-    currentWeekHabit.value.steps.push({
-      order: currentWeekHabit.value.steps.length + 1,
-      instruction,
-    })
-    syncStepsToBackend()
-  }
-
-  function removeHabitStep(index: number) {
-    currentWeekHabit.value.steps = currentWeekHabit.value.steps
-      .filter((_, i) => i !== index)
-      .map((s, i) => ({ ...s, order: i + 1 }))
-    syncStepsToBackend()
-  }
-
-  function syncStepsToBackend() {
-    const habitId = currentWeekHabit.value.id
-    if (/^\d+$/.test(habitId)) {
-      api.habits.updateCurrent({ steps: currentWeekHabit.value.steps.map(s => ({ instruction: s.instruction, order: s.order })) })
-        .catch((e) => console.warn('同步步骤失败', e))
+  function updateHabit(id: string, data: Partial<HabitSOP>) {
+    const habit = habits.value.find(h => h.id === id)
+    if (!habit) return
+    Object.assign(habit, data)
+    if (/^\d+$/.test(id)) {
+      api.habits.update({
+        id,
+        title: data.title,
+        rewardPoints: data.rewardPoints,
+        steps: habit.steps.map(s => ({ instruction: s.instruction, order: s.order })),
+      }).catch((e) => console.warn('更新习惯同步失败', e))
     }
   }
 
-  function archiveCurrentHabit() {
-    const existing = habitHistory.value.find(h => h.id === currentWeekHabit.value.id)
-    if (!existing) habitHistory.value.unshift({ ...currentWeekHabit.value })
+  function addStepToHabit(habitId: string, instruction: string) {
+    const habit = habits.value.find(h => h.id === habitId)
+    if (!habit) return
+    habit.steps.push({ order: habit.steps.length + 1, instruction })
+    syncStepsToBackend(habitId)
   }
 
-  function createNewHabit(title: string) {
-    archiveCurrentHabit()
-    const nextWeek = currentWeekHabit.value.weekNumber + 1
+  function removeHabitStep(habitId: string, index: number) {
+    const habit = habits.value.find(h => h.id === habitId)
+    if (!habit) return
+    habit.steps = habit.steps.filter((_, i) => i !== index).map((s, i) => ({ ...s, order: i + 1 }))
+    syncStepsToBackend(habitId)
+  }
+
+  function syncStepsToBackend(habitId: string) {
+    const habit = habits.value.find(h => h.id === habitId)
+    if (!habit || !/^\d+$/.test(habitId)) return
+    api.habits.update({ id: habitId, steps: habit.steps.map(s => ({ instruction: s.instruction, order: s.order })) })
+      .catch((e) => console.warn('同步步骤失败', e))
+  }
+
+  function createNewHabit(title: string, rewardPoints = 5) {
     const next: HabitSOP = {
       id: `habit-${Date.now()}`,
       title,
-      weekNumber: nextWeek,
+      rewardPoints,
       steps: [],
     }
-    currentWeekHabit.value = next
-    api.habits.create({ title, weekNumber: nextWeek }).then((res: any) => {
+    habits.value.push(next)
+    api.habits.create({ title, rewardPoints }).then((res: any) => {
       if (res?.habit?.pk_habit_sops) {
         next.id = String(res.habit.pk_habit_sops)
       }
@@ -343,49 +351,54 @@ export const useTaskStore = defineStore('task', () => {
     return next
   }
 
-  async function loadHabitFromHistory(id: string) {
-    const local = habitHistory.value.find(h => h.id === id)
+  function deleteHabit(id: string) {
+    // 软删除：从活跃列表中移除，但保留在 inventory 中
+    const habit = habits.value.find(h => h.id === id)
+    if (habit) habit.active = false
     if (/^\d+$/.test(id)) {
-      try {
-        const res = await api.habits.getDetail(id)
-        if (res?.habit) {
-          const habit = normalizeHabit(res.habit)
-          currentWeekHabit.value = habit
-          const existing = habitHistory.value.find(h => h.id === id)
-          if (existing) Object.assign(existing, habit)
-          return
-        }
-      } catch { /* fallback to local */ }
+      api.habits.delete(id).catch(() => { /* offline */ })
     }
-    if (local) currentWeekHabit.value = { ...local }
+  }
+
+  // 永久删除习惯
+  function permanentDeleteHabit(id: string) {
+    habits.value = habits.value.filter(h => h.id !== id)
+    if (/^\d+$/.test(id)) {
+      api.habits.deletePermanent(id).catch(() => { /* offline */ })
+    }
+  }
+
+  // 重新启用习惯
+  function restoreHabit(id: string) {
+    const habit = habits.value.find(h => h.id === id)
+    if (habit) {
+      habit.active = true
+      if (/^\d+$/.test(id)) {
+        api.habits.update({ ...habit, id }).catch(() => {})
+      }
+    }
   }
 
   return {
     todayTasks,
-    currentWeekHabit,
-    habitHistory,
+    habits,
     weeklyProgress,
     fetchFromApi,
     completeTask,
     setTodayTasks,
     resetTodayTasks,
-    updateCurrentHabit,
-    setHabitSteps,
+    updateHabit,
     addStepToHabit,
     removeHabitStep,
-    archiveCurrentHabit,
     createNewHabit,
-    loadHabitFromHistory,
+    deleteHabit,
+    permanentDeleteHabit,
+    restoreHabit,
   }
 })
 
 export const useMistakeStore = defineStore('mistake', () => {
-  const saved = loadState('cc-mistake', {
-    records: [] as MistakeRecord[],
-  })
-  const records = ref<MistakeRecord[]>(saved.records)
-
-  watch(() => ({ records: records.value }), value => persistState('cc-mistake', value), { deep: true })
+  const records = ref<MistakeRecord[]>([])
 
   function addRecord(record: Omit<MistakeRecord, 'id' | 'createdAt'>) {
     const next: MistakeRecord = {
@@ -415,82 +428,109 @@ export const useMistakeStore = defineStore('mistake', () => {
     } catch { /* offline */ }
   }
 
-  return { records, addRecord, removeRecord, fetchFromApi }
-})
+  const dueReviews = computed(() =>
+    records.value.filter(r => !r.resolved && r.nextReviewAt && new Date(r.nextReviewAt) <= new Date()),
+  )
 
-const seededBadges: BadgeItem[] = [
-  { id: 'read-7', name: '指读先锋', description: '连续 7 天完成指读圈号', icon: '☝️', color: '#fbe270', unlocked: false, requirement: '连续 7 天完成主线习惯' },
-  { id: 'space-7', name: '镜面空间', description: '连续整理书桌 7 天', icon: '🪞', color: '#80dc67', unlocked: false, requirement: '连续整理书桌 7 天' },
-  { id: 'detective', name: '复盘小侦探', description: '完成 10 次黄金一问', icon: '🔎', color: '#92e3ff', unlocked: false, requirement: '累计记录 10 道错题诊断' },
-  { id: 'captain', name: '时间船长', description: '完成 5 次番茄钟复盘', icon: '⏱️', color: '#ffd9c7', unlocked: false, requirement: '完成 5 次番茄钟' },
-]
-
-export const useBadgeStore = defineStore('badge', () => {
-  const saved = loadState('cc-badge', { badges: seededBadges, covenants: [] as FamilyCovenant[], confettiActive: false })
-  const badges = ref<BadgeItem[]>(saved.badges?.length ? saved.badges : seededBadges)
-  const covenants = ref<FamilyCovenant[]>(saved.covenants)
-  const confettiActive = ref(false)
-  const unlockedCount = computed(() => badges.value.filter(b => b.unlocked).length)
-
-  watch(() => ({ badges: badges.value, covenants: covenants.value }), value => persistState('cc-badge', value), { deep: true })
-
-  async function fetchFromApi() {
+  async function reviewRecord(id: string, canResolve: boolean, confidenceLevel?: number) {
+    const record = records.value.find(r => r.id === id)
+    if (!record) return
     try {
-      const res = await api.badges.list()
-      const raw: any[] = res.badges ?? []
-      if (raw.length) badges.value = raw.map(normalizeBadge)
-    } catch { /* offline */ }
-    try {
-      const res = await api.covenants.list()
-      const raw: any[] = res.covenants ?? []
-      covenants.value = raw.map(normalizeCovenant)
+      const res = await api.mistakes.review(id, { canResolve, confidenceLevel })
+      if (res?.record) {
+        const updated = normalizeMistake(res.record)
+        const idx = records.value.findIndex(r => r.id === id)
+        if (idx !== -1) records.value[idx] = updated
+      }
     } catch { /* offline */ }
   }
 
-  function unlockBadge(id: string) {
+  return { records, addRecord, removeRecord, fetchFromApi, dueReviews, reviewRecord }
+})
+
+export interface BadgeItemWithProgress extends BadgeItem {
+  requirementType?: string
+  requirementValue?: number
+  progress?: number
+}
+
+export const useBadgeStore = defineStore('badge', () => {
+  const badges = ref<BadgeItemWithProgress[]>([])
+  const confettiActive = ref(false)
+  const unlockedCount = computed(() => badges.value.filter(b => b.unlocked).length)
+  const lastNewlyUnlocked = ref<BadgeItemWithProgress[]>([])
+
+  async function fetchFromApi(childId?: string) {
+    try {
+      const res = await api.badges.list(childId)
+      const raw: any[] = res.badges ?? []
+      badges.value = raw.map(b => {
+        const base = normalizeBadge(b)
+        return {
+          ...base,
+          requirementType: b.requirement_type ?? b.requirementType,
+          requirementValue: b.requirement_value ?? b.requirementValue,
+          progress: b.progress ?? 0,
+        }
+      })
+    } catch { /* offline */ }
+  }
+
+  /** Check and auto-unlock badges. Call after key actions. */
+  async function checkAndUnlock(childId?: string) {
+    try {
+      const res = await api.badges.checkUnlocks(childId)
+      if (res.newly_unlocked && res.newly_unlocked.length > 0) {
+        // Refresh badge list to reflect the changes
+        await fetchFromApi(childId)
+        lastNewlyUnlocked.value = res.newly_unlocked.map(b => ({
+          id: String(b.pk_badges ?? ''),
+          name: b.name ?? '',
+          description: '',
+          icon: b.icon ?? '🏅',
+          color: '#fbe270',
+          unlocked: true,
+          unlockedAt: new Date().toISOString(),
+          requirement: '',
+          rewardPoints: b.reward_points,
+        }))
+        // Trigger confetti
+        confettiActive.value = true
+        setTimeout(() => { confettiActive.value = false }, 3000)
+      }
+      return res.newly_unlocked ?? []
+    } catch {
+      return []
+    }
+  }
+
+  function unlockBadge(id: string, childId?: string) {
     const badge = badges.value.find(b => b.id === id)
     if (badge && !badge.unlocked) {
       badge.unlocked = true
       badge.unlockedAt = new Date().toISOString()
       confettiActive.value = true
       setTimeout(() => { confettiActive.value = false }, 3000)
-      api.badges.unlock(id).catch(() => {})
+      api.badges.unlock(id, childId).catch(() => {})
     }
   }
 
-  function addCovenant(covenant: Omit<FamilyCovenant, 'id' | 'createdAt' | 'status'>) {
-    const next: FamilyCovenant = { ...covenant, id: `c-${Date.now()}`, createdAt: new Date().toISOString(), status: 'active' }
-    covenants.value.unshift(next)
-    api.covenants.create({ goal: covenant.goal, reward: covenant.reward }).then((res: any) => {
-      if (res?.covenant?.pk_covenants) next.id = String(res.covenant.pk_covenants)
-    }).catch(() => {})
-    return next
-  }
-
-  return { badges, covenants, confettiActive, unlockedCount, fetchFromApi, unlockBadge, addCovenant }
+  return { badges, confettiActive, unlockedCount, lastNewlyUnlocked, fetchFromApi, checkAndUnlock, unlockBadge }
 })
 
 export const useGrowthStore = defineStore('growth', () => {
-  const saved = loadState('cc-growth', {
-    trendData: [] as GrowthDataPoint[],
-    alerts: [] as DiagnosticAlert[],
-    itemLossRecords: [] as ItemLossRecord[],
-    storageRecords: [] as ItemStorageRecord[],
-  })
-  const trendData = ref<GrowthDataPoint[]>(saved.trendData)
-  const alerts = ref<DiagnosticAlert[]>(saved.alerts)
-  const itemLossRecords = ref<ItemLossRecord[]>(saved.itemLossRecords)
-  const storageRecords = ref<ItemStorageRecord[]>(saved.storageRecords || [])
+  const trendData = ref<GrowthDataPoint[]>([])
+  const alerts = ref<DiagnosticAlert[]>([])
+  const itemLossRecords = ref<ItemLossRecord[]>([])
+  const storageRecords = ref<ItemStorageRecord[]>([])
   const totalLossCost = computed(() => itemLossRecords.value.reduce((sum, item) => sum + item.estimatedCost * item.frequency, 0))
   const highFrequencyItems = computed(() => itemLossRecords.value.filter(item => item.frequency >= 3))
-
-  watch(() => ({ trendData: trendData.value, alerts: alerts.value, itemLossRecords: itemLossRecords.value, storageRecords: storageRecords.value }), value => persistState('cc-growth', value), { deep: true })
 
   async function fetchFromApi(childId?: string) {
     try {
       const res = await api.growth.getTrend(childId)
       const raw: any[] = res.trend ?? []
-      if (raw.length) trendData.value = raw.map(normalizeGrowthPoint)
+      trendData.value = raw.map(normalizeGrowthPoint)
     } catch { /* offline */ }
     try {
       const res = await api.growth.getAlerts(childId)
@@ -525,6 +565,9 @@ export const useGrowthStore = defineStore('growth', () => {
   function addItemLossRecord(record: Omit<ItemLossRecord, 'id' | 'lostDate' | 'frequency'> & { frequency?: number }) {
     const existing = itemLossRecords.value.find(item => item.itemName === record.itemName)
     if (existing) {
+      api.items.reportLoss({ itemName: record.itemName, lostLocation: record.lostLocation, estimatedCost: record.estimatedCost }).then((res: any) => {
+        if (res?.record) Object.assign(existing, normalizeItemLoss(res.record))
+      }).catch(() => {})
       existing.frequency += 1
       existing.lostDate = new Date().toISOString()
       existing.lostLocation = record.lostLocation
@@ -556,33 +599,16 @@ export const useGrowthStore = defineStore('growth', () => {
   return { trendData, alerts, itemLossRecords, storageRecords, totalLossCost, highFrequencyItems, fetchFromApi, addItemLossRecord, addStorageRecord, recordDataPoint }
 })
 
-const defaultLlmConfig: LlmConfig = {
-  endpoint: 'https://api.openai.com/v1',
-  apiKey: '',
-  model: 'gpt-4o-mini',
-  mistakePrompt: '你是一位小学教育专家。分析这张错题图片，判断：\n1. 错误类型：粗心（看错符号/抄错数/漏题）还是知识漏洞（概念不清/公式记错）\n2. 涉及的知识点\n3. 改进建议（一句话，适合 1-3 年级孩子理解）\n返回 JSON 格式：{ "type": "careless|knowledge", "detail": "...", "knowledgePoint": "...", "suggestion": "..." }',
-  assessmentPrompt: '基于以下孩子的成长数据，生成阶段性评估报告：\n- 错题总数：{mistakeCount}\n- 任务完成率：{completionRate}%\n- 物品丢失次数：{itemLossCount}\n- 当前习惯：{habitTitle}\n要求指出进步方面、需要关注的方面、以及给家长的具体建议。\n返回 JSON 格式：{ "progress": "...", "concerns": "...", "suggestions": "..." }',
-  assessmentCron: 'weekly',
-  enabled: false,
-}
-
 // ── 家长端：当前选中的孩子 ───────────────────────────────────────────────
 
 export const useChildSelectStore = defineStore('childSelect', () => {
   type Child = ReturnType<typeof normalizeChild>
 
   const children = ref<Child[]>([])
-  const selectedChildId = ref<string | null>(
-    localStorage.getItem('cc-selected-child') ?? null,
-  )
+  const selectedChildId = ref<string | null>(null)
   const selectedChild = computed(
     () => children.value.find(c => c.id === selectedChildId.value) ?? children.value[0] ?? null,
   )
-
-  watch(selectedChildId, id => {
-    if (id) localStorage.setItem('cc-selected-child', id)
-    else localStorage.removeItem('cc-selected-child')
-  })
 
   async function loadChildren() {
     try {
@@ -601,22 +627,13 @@ export const useChildSelectStore = defineStore('childSelect', () => {
   return { children, selectedChildId, selectedChild, loadChildren, selectChild }
 })
 
-export const useParentStore = defineStore('parent', () => {  const saved = loadState('cc-parent', {
-    settings: { difficultyLevel: 2, dailyReminder: true, achievementNotification: true, weeklyReport: true, schoolSync: false } as ParentSettings,
-    discussionPosts: [] as DiscussionPost[],
-    articles: [] as ArticleResource[],
-    parentTaskTemplates: [] as TaskItem[],
-    llmConfig: defaultLlmConfig,
-  })
-  const settings = ref<ParentSettings>(saved.settings)
-  const discussionPosts = ref<DiscussionPost[]>(saved.discussionPosts)
-  const articles = ref<ArticleResource[]>(saved.articles)
-  const parentTaskTemplates = ref<TaskItem[]>(saved.parentTaskTemplates || [])
-  const llmConfig = ref<LlmConfig>(saved.llmConfig || defaultLlmConfig)
+export const useParentStore = defineStore('parent', () => {
+  const settings = ref<ParentSettings>({ dailyReminder: true, achievementNotification: true, weeklyReport: true, schoolSync: false })
+  const articles = ref<ArticleResource[]>([])
+  const parentTaskTemplates = ref<TaskItem[]>([])
+  const llmConfig = ref<LlmConfig>({ endpoint: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini', mistakePrompt: '', assessmentPrompt: '', assessmentCron: 'weekly', enabled: false })
 
-  watch(() => ({ settings: settings.value, discussionPosts: discussionPosts.value, articles: articles.value, parentTaskTemplates: parentTaskTemplates.value, llmConfig: llmConfig.value }), value => persistState('cc-parent', value), { deep: true })
-
-  async function fetchFromApi() {
+  async function fetchFromApi(childId?: string) {
     try {
       const res = await api.parent.getSettings()
       const raw = res.settings ?? res
@@ -628,9 +645,21 @@ export const useParentStore = defineStore('parent', () => {  const saved = loadS
       if (raw?.endpoint) llmConfig.value = normalizeLlmConfig(raw)
     } catch { /* offline */ }
     try {
-      const res = await api.community.getPosts(1)
-      const raw: any[] = res.posts ?? []
-      discussionPosts.value = raw.map(normalizePost)
+      const res = await api.articles.list()
+      const raw: any[] = res.articles ?? []
+      articles.value = raw.map(normalizeArticle)
+    } catch { /* offline */ }
+    try {
+      const res = await api.tasks.getToday(childId)
+      const raw: any[] = res.tasks ?? []
+      parentTaskTemplates.value = raw.map(t => {
+        const task = normalizeTask(t)
+        const existing = parentTaskTemplates.value.find(e => e.id === task.id)
+        if (existing?.subTasks?.length && !task.subTasks?.length) {
+          task.subTasks = existing.subTasks
+        }
+        return task
+      })
     } catch { /* offline */ }
   }
 
@@ -642,17 +671,6 @@ export const useParentStore = defineStore('parent', () => {  const saved = loadS
   function updateLlmConfig(c: Partial<LlmConfig>) {
     Object.assign(llmConfig.value, c)
     api.llm.updateConfig(c).catch(() => {})
-  }
-
-  function createPost(data: { title: string; content: string; tags: string[] }) {
-    const localPost: DiscussionPost = { id: `post-${Date.now()}`, author: '匿名家长', replyCount: 0, hasExpertAnswer: false, createdAt: new Date().toISOString(), ...data }
-    discussionPosts.value.unshift(localPost)
-    api.community.createPost(data).then((res: any) => {
-      if (res?.post) {
-        const idx = discussionPosts.value.findIndex(p => p.id === localPost.id)
-        if (idx !== -1) discussionPosts.value[idx] = normalizePost(res.post)
-      }
-    }).catch(() => {})
   }
 
   function addTaskTemplate(task: Omit<TaskItem, 'id'>) {
@@ -667,8 +685,38 @@ export const useParentStore = defineStore('parent', () => {  const saved = loadS
   }
 
   function deleteTaskTemplate(id: string) {
-    parentTaskTemplates.value = parentTaskTemplates.value.filter(t => t.id !== id)
+    // 软删除：从活跃列表中移除，但保留在 inventory 中
+    const template = parentTaskTemplates.value.find(t => t.id === id)
+    if (template) template.active = false
   }
 
-  return { settings, discussionPosts, articles, parentTaskTemplates, llmConfig, fetchFromApi, updateSettings, updateLlmConfig, createPost, addTaskTemplate, updateTaskTemplate, deleteTaskTemplate }
+  // 永久删除任务
+  function permanentDeleteTaskTemplate(id: string) {
+    parentTaskTemplates.value = parentTaskTemplates.value.filter(t => t.id !== id)
+    if (/^\d+$/.test(id)) {
+      api.tasks.deletePermanent(id).catch(() => { /* offline */ })
+    }
+  }
+
+  // 重新启用任务
+  function restoreTaskTemplate(id: string) {
+    const template = parentTaskTemplates.value.find(t => t.id === id)
+    if (template) {
+      template.active = true
+      if (/^\d+$/.test(id)) {
+        api.tasks.update(id, { active: true }).catch(() => {})
+      }
+    }
+  }
+
+  // 从清单中加载所有任务（包括 inactive）
+  const allTaskInventory = computed(() =>
+    parentTaskTemplates.value.slice().sort((a, b) => {
+      // active 的排前面，然后按创建时间倒序
+      if (a.active !== b.active) return a.active ? -1 : 1
+      return 0
+    })
+  )
+
+  return { settings, articles, parentTaskTemplates, llmConfig, fetchFromApi, updateSettings, updateLlmConfig, addTaskTemplate, updateTaskTemplate, deleteTaskTemplate, permanentDeleteTaskTemplate, restoreTaskTemplate, allTaskInventory }
 })

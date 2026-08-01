@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../stores'
-import { api, clearAuthToken, getAuthToken, setAuthToken } from '../utils/api'
+import { api, clearAuthToken, setAuthToken } from '../utils/api'
+import { gradeLabel } from '../utils/constants'
 
 const router = useRouter()
 const route = useRoute()
@@ -13,6 +14,16 @@ const isViewingAsChild = computed(() => {
   // 当前是孩子 token，但存有家长 token（说明是切换过来的）
   return userStore.profile.role === 'child' && !!localStorage.getItem('cc-parent-token')
 })
+
+// 页面切换时刷新阳光/苹果余额：顶部 pill 与各页面共享同一 store，刷新一次即全局生效
+// （家长端自身顶部不显示阳光值，且切换孩子由 App.vue 统一加载，故仅孩子视角需要）
+watch(
+  () => route.fullPath,
+  () => {
+    if (isParent.value && !isViewingAsChild.value) return
+    userStore.fetchFromApi()
+  },
+)
 
 // 修改密码
 const showPasswordModal = ref(false)
@@ -54,22 +65,23 @@ async function changePassword() {
 const childNavItems = [
   { name: 'Dashboard', path: '/dashboard', icon: '🌳', label: '协同仪表盘' },
   { name: 'HabitCenter', path: '/habit', icon: '✅', label: '每日打卡' },
+  { name: 'SunshineTree', path: '/tree', icon: '🍎', label: '阳光树' },
   { name: 'MistakeBook', path: '/mistake', icon: '📚', label: '我的题库' },
   { name: 'ItemTracker', path: '/tracker', icon: '🎒', label: '物品管理' },
   { name: 'GrowthArchive', path: '/growth', icon: '📈', label: '成长档案' },
   { name: 'SunlightRedemption', path: '/sunlight', icon: '☀️', label: '阳光兑换' },
-  { name: 'BadgeRoom', path: '/badge', icon: '🏅', label: '契约勋章' },
+  { name: 'BadgeRoom', path: '/badge', icon: '🏅', label: '勋章馆' },
 ]
 const parentNavItems = [
   { name: 'ParentControl', path: '/parent', icon: '🧭', label: '家长控制' },
   { name: 'ChildManagement', path: '/parent/children', icon: '👦', label: '孩子管理' },
   { name: 'ProgressDashboard', path: '/parent/progress', icon: '📊', label: '进度查看' },
   { name: 'TaskHabitManager', path: '/parent/tasks', icon: '📋', label: '任务与习惯' },
+  { name: 'TaskHabitInventory', path: '/parent/inventory', icon: '📦', label: '任务清单' },
   { name: 'ItemStats', path: '/parent/items', icon: '🎒', label: '物品统计' },
   { name: 'SunlightManagement', path: '/parent/sunlight', icon: '☀️', label: '阳光值' },
-  { name: 'ParentBadges', path: '/parent/badges', icon: '🏅', label: '勋章契约' },
+  { name: 'ParentBadges', path: '/parent/badges', icon: '🏅', label: '勋章管理' },
   { name: 'LlmConfig', path: '/parent/llm', icon: '🤖', label: '模型配置' },
-  { name: 'CommunityGarden', path: '/parent/garden', icon: '🌸', label: '社区花园' },
 ]
 const navItems = computed(() => (isParent.value ? parentNavItems : childNavItems))
 
@@ -100,18 +112,16 @@ function logout() {
         <span v-if="isViewingAsChild" class="pill child-badge">
           👦 {{ userStore.profile.name }} 的视角
         </span>
-        <span v-else class="pill">☀️ {{ userStore.sunlightPoints || 0 }} 阳光值</span>
-        <span v-if="!isParent" class="pill">Lv{{ userStore.assessment.recommendedLevel }} · {{ userStore.profile.grade || 3 }}年级</span>
+        <span v-if="!isParent || isViewingAsChild" class="pill">☀️ {{ userStore.sunlightPoints || 0 }} 阳光值 · 🍎 {{ userStore.apples || 0 }} 苹果</span>
+        <span v-if="!isParent" class="pill">Lv{{ userStore.assessment.recommendedLevel }} · {{ gradeLabel(userStore.profile.grade || 3) }}</span>
         <button v-if="isViewingAsChild" class="role-btn back-btn" @click="backToParent">↩ 返回家长端</button>
-        <template v-else>
-          <button class="role-btn pwd-btn" @click="openPasswordModal">🔑 修改密码</button>
-          <button class="role-btn logout-btn" @click="logout">退出登录</button>
-        </template>
+        <button v-if="!isViewingAsChild" class="role-btn pwd-btn" @click="openPasswordModal">🔑 修改密码</button>
+        <button v-if="!isViewingAsChild" class="role-btn logout-btn" @click="logout">退出登录</button>
       </div>
     </header>
 
     <aside class="sidebar">
-      <div class="tree-card">
+      <div class="tree-card clickable-card" @click="router.push(isParent ? '/parent' : '/dashboard')">
         <div class="tree-visual">{{ isParent ? '🌳' : '🌱' }}</div>
         <strong>{{ userStore.profile.name || '我的' }}{{ isParent ? ' 的管理台' : ' 的成长树' }}</strong>
         <span>{{ isParent ? '管理孩子的成长旅程' : '今天只聚焦 1 个核心习惯' }}</span>
@@ -185,6 +195,8 @@ function logout() {
 .tree-card { padding: 18px; border-radius: 26px; background: #fff; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(75,63,54,.08); display: flex; flex-direction: column; gap: 8px; }
 .tree-visual { height: 86px; display: grid; place-items: center; border-radius: 22px; background: linear-gradient(180deg, #c9f2ff, #f6ffd7); font-size: 48px; }
 .tree-card span { color: var(--muted); font-size: 13px; }
+.clickable-card { cursor: pointer; transition: background .12s ease; }
+.clickable-card:hover { background: #f7fcef; }
 .nav-list { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 18px; color: var(--muted); text-decoration: none; font-weight: 850; }
 .nav-item:hover { background: rgba(255,255,255,.8); color: var(--ink); }

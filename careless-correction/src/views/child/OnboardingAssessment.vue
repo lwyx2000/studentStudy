@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { gradeLabel } from '../../utils/constants'
+import { api } from '../../utils/api'
 import { useBadgeStore, useGrowthStore, useMistakeStore, useParentStore, useTaskStore, useUserStore } from '../../stores'
 
 const router = useRouter()
@@ -33,6 +35,16 @@ async function generateProfile() {
     impulseControl: impulse.value,
     recommendedLevel: recommendedLevel.value,
   })
+  // 持久化到后端：保存评估并标记 onboarding 完成
+  api.auth.saveAssessment({
+    focusAttention: focus.value,
+    organization: organization.value,
+    emotionalControl: emotion.value,
+    planning: planning.value,
+    impulseControl: impulse.value,
+    recommendedLevel: recommendedLevel.value,
+    taskDensity: recommendedLevel.value >= 4 ? 'high' : recommendedLevel.value <= 2 ? 'low' : 'medium',
+  }).catch(() => { /* offline 时本地保存 */ })
   userStore.completeOnboarding()
   await Promise.allSettled([
     useTaskStore().fetchFromApi(),
@@ -71,7 +83,7 @@ function updateSlider(update: (val: number) => void, event: Event) {
         </div>
 
         <label class="field"><span>孩子称呼</span><input v-model="name" class="input" placeholder="例如 Leo" /></label>
-        <label class="field"><span>物理年级：{{ grade }} 年级</span><input v-model.number="grade" class="range" type="range" min="1" max="6" /></label>
+        <label class="field"><span>物理年级：{{ gradeLabel(grade) }}</span><input v-model.number="grade" class="range" type="range" min="0" max="12" /></label>
         <label v-for="slider in sliders" :key="slider.key" class="field">
           <span>{{ slider.label }}：{{ slider.value }}</span>
           <input class="range" type="range" min="1" max="5" :value="slider.value" @input="updateSlider(slider.update, $event)" />
@@ -79,7 +91,7 @@ function updateSlider(update: (val: number) => void, event: Event) {
 
         <transition name="fade-up">
           <div v-if="generated" class="result-card">
-            <strong>{{ name }} 的物理年级：{{ grade }} 年级</strong>
+            <strong>{{ name }} 的物理年级：{{ gradeLabel(grade) }}</strong>
             <span>当前执行功能推荐起点：Level {{ recommendedLevel }} 难度</span>
           </div>
         </transition>

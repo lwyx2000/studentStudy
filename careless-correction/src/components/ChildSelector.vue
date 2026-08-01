@@ -1,7 +1,15 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
+import { gradeLabel } from '../utils/constants'
 import { useChildSelectStore } from '../stores'
 
 const childSelectStore = useChildSelectStore()
+
+onMounted(() => {
+  if (!childSelectStore.children.length) {
+    childSelectStore.loadChildren()
+  }
+})
 </script>
 
 <template>
@@ -17,7 +25,7 @@ const childSelectStore = useChildSelectStore()
       >
         <span class="avatar">{{ child.name[0] }}</span>
         {{ child.name }}
-        <span class="grade">{{ child.grade }}年级</span>
+        <span class="grade">{{ gradeLabel(child.grade) }}</span>
       </button>
     </div>
     <span v-if="!childSelectStore.selectedChild" class="muted" style="font-size:13px">

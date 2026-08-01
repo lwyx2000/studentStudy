@@ -1,23 +1,59 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useChildSelectStore, useParentStore, useTaskStore, useUserStore } from '../../stores'
-import { api, normalizeSubTask } from '../../utils/api'
-import type { TaskCategory } from '../../types'
+import { api, normalizeSubTask, normalizeTask } from '../../utils/api'
+import { weekDayToLabel } from '../../utils/constants'
+import type { TaskCategory, TaskItem } from '../../types'
 import ChildSelector from '../../components/ChildSelector.vue'
+import WeekdayPicker from '../../components/WeekdayPicker.vue'
+import InventoryPickerModal from '../../components/InventoryPickerModal.vue'
 
 const parentStore = useParentStore()
 const taskStore = useTaskStore()
 const userStore = useUserStore()
 const childSelectStore = useChildSelectStore()
 
-const activeTab = ref<'tasks' | 'habits' | 'print'>('tasks')
+const downloading = ref(false)
+const loadingData = ref(false)
+const now = new Date()
+const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`
+
+// ── Load data from API ──
+async function loadData() {
+  loadingData.value = true
+  const childId = childSelectStore.selectedChildId ?? undefined
+  try {
+    // Load ALL tasks (including completed) from inventory endpoint
+    const taskRes = await api.tasks.getInventory(childId)
+    const tasks = (taskRes.tasks ?? []).map(normalizeTask)
+    parentStore.parentTaskTemplates.splice(0, parentStore.parentTaskTemplates.length, ...tasks)
+  } catch { /* offline */ }
+  try {
+    // Load habits
+    await taskStore.fetchFromApi(childId)
+  } catch { /* offline */ }
+  loadingData.value = false
+}
+
+// Watch child change → reload data
+watch(() => childSelectStore.selectedChildId, async () => {
+  await loadData()
+  if (parentStore.parentTaskTemplates.length) {
+    showSubTasks(parentStore.parentTaskTemplates[0].id)
+  }
+  await loadAllSubtasks()
+  loadSubTaskLibrary().catch(() => {})
+  loadStepLibrary().catch(() => {})
+})
+
+const activeTab = ref<'tasks' | 'habits'>('tasks')
 
 // ── Task Management ────────────────────────────────────────────────
 
 const title = ref('')
 const description = ref('')
 const type = ref<TaskCategory>('study_habit')
-const rewardPoints = ref(20)
+const rewardPoints = ref(5)
 const icon = ref('☝️')
 
 const categoryOptions: { value: TaskCategory; label: string; icon: string }[] = [
@@ -30,6 +66,89 @@ const categoryOptions: { value: TaskCategory; label: string; icon: string }[] = 
 
 const iconOptions = ['☝️', '📖', '✏️', '🎒', '🧠', '🏃', '🧹', '💭', '🌟', '📝', '🔔', '🎯']
 
+const taskWeekDay = ref('')
+const showWeekdayPicker = ref(false)
+const showSubtaskWeekdayPicker = ref(false)
+
+// ── Inventory Picker Modal (for sub-tasks and steps) ──
+const subTaskPickerVisible = ref(false)
+const stepPickerVisible = ref(false)
+const subTaskLibrary = ref<any[]>([])
+const stepLibrary = ref<any[]>([])
+
+async function loadSubTaskLibrary() {
+  const childId = childSelectStore.selectedChildId ?? undefined
+  try {
+    const res = await api.tasks.getSubTaskLibrary(childId)
+    subTaskLibrary.value = res.subtasks ?? []
+  } catch { /* offline */ }
+}
+
+async function loadStepLibrary() {
+  const childId = childSelectStore.selectedChildId ?? undefined
+  try {
+    const res = await api.habits.getStepLibrary(childId)
+    stepLibrary.value = res.steps ?? []
+  } catch { /* offline */ }
+}
+
+async function openSubTaskPicker() {
+  await loadSubTaskLibrary()
+  subTaskPickerVisible.value = true
+}
+
+async function openStepPicker() {
+  await loadStepLibrary()
+  stepPickerVisible.value = true
+}
+
+function onSubTaskSelected(selected: any[]) {
+  if (!expandedTaskId.value) return
+  const task = parentStore.parentTaskTemplates.find(t => t.id === expandedTaskId.value)
+  if (!task) return
+  if (!task.subTasks) task.subTasks = []
+
+  for (const s of selected) {
+    const localId = `st-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    task.subTasks.push({
+      id: localId,
+      title: s.title,
+      type: s.type || task.type,
+      weekDay: s.week_day || undefined,
+      sortOrder: task.subTasks.length,
+    })
+    // Sync to backend
+    if (/^\d+$/.test(expandedTaskId.value)) {
+      api.tasks.subtasks.add(expandedTaskId.value, {
+        title: s.title,
+        type: s.type || task.type,
+        weekDay: s.week_day || undefined,
+        sortOrder: task.subTasks.length - 1,
+      }).then((res: any) => {
+        const backendId = String(res.pk_sub_tasks ?? '')
+        if (backendId && task.subTasks) {
+          const idx = task.subTasks.findIndex(st => st.id === localId)
+          if (idx !== -1) task.subTasks[idx].id = backendId
+        }
+      }).catch(() => {})
+    }
+  }
+  parentStore.updateTaskTemplate(expandedTaskId.value, { subTasks: [...task.subTasks] })
+}
+
+function onStepSelected(selected: any[]) {
+  if (!editingHabitId.value) return
+  for (const s of selected) {
+    taskStore.addStepToHabit(editingHabitId.value, s.instruction)
+  }
+}
+
+// Ensure sub-task library is pre-loaded for speed
+onMounted(() => {
+  loadSubTaskLibrary().catch(() => {})
+  loadStepLibrary().catch(() => {})
+})
+
 async function createTask() {
   if (!title.value.trim()) return
   const childId = childSelectStore.selectedChildId ?? undefined
@@ -41,6 +160,7 @@ async function createTask() {
     type: type.value,
     rewardPoints: rewardPoints.value,
     icon: icon.value,
+    weekDay: taskWeekDay.value || undefined,
     status: 'pending',
   })
 
@@ -53,6 +173,7 @@ async function createTask() {
         description: description.value.trim(),
         rewardPoints: rewardPoints.value,
         icon: icon.value,
+        weekDay: taskWeekDay.value || undefined,
         childId,
       })
       const backendId = String(res.pk_tasks ?? res.task?.pk_tasks ?? '')
@@ -65,59 +186,114 @@ async function createTask() {
   title.value = ''
   description.value = ''
   type.value = 'study_habit'
-  rewardPoints.value = 20
+  rewardPoints.value = 5
   icon.value = '☝️'
+  taskWeekDay.value = ''
 }
 
 function deleteTask(id: string) {
-  // Delete from backend if synced (numeric ID)
+  if (!confirm('确定要停用该任务吗？可在「任务清单」中恢复。')) return
   if (/^\d+$/.test(id)) {
     api.tasks.delete(id).catch(() => { /* offline */ })
   }
   parentStore.deleteTaskTemplate(id)
   // Auto-switch to another task if the deleted one was active
   if (expandedTaskId.value === id) {
-    const remaining = parentStore.parentTaskTemplates
+    const remaining = parentStore.parentTaskTemplates.filter(t => t.active !== false)
     expandedTaskId.value = remaining.length ? remaining[0].id : null
   }
+    if (taskEditId.value === id) cancelEdit()
+}
+
+// ── Inline Edit Task ──
+const taskEditId = ref<string | null>(null)
+const taskEditTitle = ref('')
+const taskEditDesc = ref('')
+const taskEditType = ref<TaskCategory>('study_habit')
+const taskEditPoints = ref(5)
+const taskEditIcon = ref('☝️')
+
+function startEdit(task: TaskItem) {
+  taskEditId.value = task.id
+  taskEditTitle.value = task.title
+  taskEditDesc.value = task.description
+  taskEditType.value = task.type
+  taskEditPoints.value = task.rewardPoints
+  taskEditIcon.value = task.icon
+}
+
+function saveEdit(id: string) {
+  if (!taskEditTitle.value.trim()) return
+  parentStore.updateTaskTemplate(id, {
+    title: taskEditTitle.value.trim(),
+    description: taskEditDesc.value.trim(),
+    type: taskEditType.value,
+    rewardPoints: taskEditPoints.value,
+    icon: taskEditIcon.value,
+  })
+  const hasBackendId = /^\d+$/.test(id)
+  if (hasBackendId) {
+    api.tasks.update(id, {
+      title: taskEditTitle.value.trim(),
+      description: taskEditDesc.value.trim(),
+      type: taskEditType.value,
+      rewardPoints: taskEditPoints.value,
+      icon: taskEditIcon.value,
+    }).catch(() => {})
+  }
+  taskEditId.value = null
+}
+
+function cancelEdit() {
+  taskEditId.value = null
 }
 
 // ── Habit Management ──────────────────────────────────────────────
 
-const editTitle = ref(taskStore.currentWeekHabit.title)
-const editWeek = ref(taskStore.currentWeekHabit.weekNumber)
+const editingHabitId = ref<string | null>(null)
+const editTitle = ref('')
+const editRewardPoints = ref(5)
 const newStep = ref('')
 const newHabitTitle = ref('')
 
+function startEditHabit(id: string) {
+  const h = taskStore.habits.find(x => x.id === id)
+  if (!h) return
+  editingHabitId.value = id
+  editTitle.value = h.title
+  editRewardPoints.value = h.rewardPoints
+}
+
 function saveHabit() {
-  taskStore.updateCurrentHabit({
-    title: editTitle.value.trim() || taskStore.currentWeekHabit.title,
-    weekNumber: editWeek.value,
+  if (!editingHabitId.value) return
+  taskStore.updateHabit(editingHabitId.value, {
+    title: editTitle.value.trim(),
+    rewardPoints: editRewardPoints.value,
   })
+  alert('习惯保存成功 ✅')
 }
 
 function addStep() {
-  if (!newStep.value.trim()) return
-  taskStore.addStepToHabit(newStep.value.trim())
+  if (!editingHabitId.value || !newStep.value.trim()) return
+  taskStore.addStepToHabit(editingHabitId.value, newStep.value.trim())
   newStep.value = ''
 }
 
-function removeStep(index: number) {
-  taskStore.removeHabitStep(index)
+function removeStep(habitId: string, index: number) {
+  taskStore.removeHabitStep(habitId, index)
 }
 
 function createHabit() {
   if (!newHabitTitle.value.trim()) return
-  taskStore.createNewHabit(newHabitTitle.value.trim())
-  editTitle.value = taskStore.currentWeekHabit.title
-  editWeek.value = taskStore.currentWeekHabit.weekNumber
+  const habit = taskStore.createNewHabit(newHabitTitle.value.trim())
   newHabitTitle.value = ''
+  startEditHabit(habit.id)
 }
 
-async function loadHistory(id: string) {
-  await taskStore.loadHabitFromHistory(id)
-  editTitle.value = taskStore.currentWeekHabit.title
-  editWeek.value = taskStore.currentWeekHabit.weekNumber
+function deleteHabit(id: string, title: string) {
+  if (!confirm(`确定要停用习惯「${title}」吗？可在「任务清单」中恢复。`)) return
+  if (editingHabitId.value === id) editingHabitId.value = null
+  taskStore.deleteHabit(id)
 }
 
 // ── Sub-task Management ──
@@ -133,7 +309,8 @@ const dragOverSubtaskId = ref<string | null>(null)
 async function showSubTasks(taskId: string) {
   expandedTaskId.value = taskId
   newSubtaskTitle.value = ''
-  newSubtaskWeekDay.value = ''
+  const parentTask = parentStore.parentTaskTemplates.find(t => t.id === taskId)
+  newSubtaskWeekDay.value = parentTask?.weekDay ?? ''
   newSubtaskType.value = ''
   dragSubtaskId.value = null
   dragOverSubtaskId.value = null
@@ -221,13 +398,6 @@ function removeSubtask(taskId: string, subtaskId: string) {
   }
 }
 
-function subtaskWeekDayLabel(wd?: string): string {
-  if (!wd) return '每天'
-  if (wd === 'weekday') return '📅 平时'
-  if (wd === 'weekend') return '🎉 周末'
-  return wd
-}
-
 // ── Drag-and-drop handlers ──
 
 function onDragStart(subtaskId: string, event: DragEvent) {
@@ -255,7 +425,7 @@ function onDragOver(event: DragEvent) {
   event.dataTransfer!.dropEffect = 'move'
 }
 
-function onDragEnter(taskId: string, subtaskId: string, event: DragEvent) {
+function onDragEnter(_taskId: string, subtaskId: string, event: DragEvent) {
   if (subtaskId === dragSubtaskId.value) return
   // Ignore enter events bubbling from children within the same row
   const target = event.currentTarget as HTMLElement | null
@@ -264,7 +434,7 @@ function onDragEnter(taskId: string, subtaskId: string, event: DragEvent) {
   dragOverSubtaskId.value = subtaskId
 }
 
-function onDragLeave(taskId: string, subtaskId: string, event: DragEvent) {
+function onDragLeave(_taskId: string, subtaskId: string, event: DragEvent) {
   // Ignore leave events when entering a child element within the same row
   const target = event.currentTarget as HTMLElement | null
   const related = event.relatedTarget as Node | null
@@ -304,6 +474,13 @@ function onDrop(taskId: string, targetSubtaskId: string, event: DragEvent) {
   // Reindex sortOrder
   task.subTasks.forEach((s, i) => { s.sortOrder = i })
   parentStore.updateTaskTemplate(taskId, { subTasks: [...task.subTasks] })
+  if (/^\d+$/.test(taskId)) {
+    task.subTasks.forEach(s => {
+      if (/^\d+$/.test(s.id)) {
+        api.tasks.subtasks.update(taskId, s.id, { sortOrder: s.sortOrder }).catch(() => {})
+      }
+    })
+  }
 
   dragSubtaskId.value = null
   dragOverSubtaskId.value = null
@@ -314,11 +491,13 @@ function getSubTasks(taskId: string) {
   return parentStore.parentTaskTemplates.find(t => t.id === taskId)?.subTasks
 }
 
-// ── Auto-expand first task on mount ──
-onMounted(() => {
+// ── Auto-expand first task on mount + load all subtasks ──
+onMounted(async () => {
+  await loadData()
   if (parentStore.parentTaskTemplates.length) {
     showSubTasks(parentStore.parentTaskTemplates[0].id)
   }
+  await loadAllSubtasks()
 })
 
 watch(() => parentStore.parentTaskTemplates.length, (len) => {
@@ -328,76 +507,9 @@ watch(() => parentStore.parentTaskTemplates.length, (len) => {
 })
 
 
-// ── Print Preview ─────────────────────────────────────────────────
-
-const selectedTaskIds = ref<Set<string>>(new Set(parentStore.parentTaskTemplates.map(t => t.id)))
-
-const allTasks = computed(() => parentStore.parentTaskTemplates)
-
-const selectedTasks = computed(() =>
-  allTasks.value.filter(t => selectedTaskIds.value.has(t.id))
-)
-
-// Build checklist from selected tasks (ONLY sub-tasks appear, never tasks)
-function buildChecklist() {
-  const items: Array<{
-    id: string
-    title: string
-    icon: string
-    description: string
-    type?: string
-    weekDay?: string
-    parentTaskTitle?: string
-  }> = []
-  for (const task of selectedTasks.value) {
-    if (!task.subTasks?.length) continue
-    for (const sub of task.subTasks) {
-      items.push({
-        id: sub.id,
-        title: sub.title,
-        icon: task.icon,
-        description: `属于：${task.title}`,
-        type: sub.type,
-        weekDay: sub.weekDay,
-        parentTaskTitle: task.title,
-      })
-    }
-  }
-  checklistItems.value = items
-}
-
-const checklistItems = ref<any[]>([])
-const printLoading = ref(false)
-
-function toggleTaskSelection(id: string) {
-  if (selectedTaskIds.value.has(id)) selectedTaskIds.value.delete(id)
-  else selectedTaskIds.value.add(id)
-  // Rebuild checklist when selection changes
-  if (activeTab.value === 'print') buildChecklist()
-}
-
-function selectAllTasks() {
-  selectedTaskIds.value = new Set(allTasks.value.map(t => t.id))
-  if (activeTab.value === 'print') buildChecklist()
-}
-
-function deselectAllTasks() {
-  selectedTaskIds.value = new Set()
-  if (activeTab.value === 'print') buildChecklist()
-}
-
-async function switchToPrint() {
-  activeTab.value = 'print'
-  selectAllTasks()
-  printLoading.value = true
-  await loadAllSubtasks()
-  buildChecklist()
-  printLoading.value = false
-}
-
-// ── Load sub-tasks for all tasks (used by print tab) ──
+// Load all subtasks for all tasks (so child page can see them)
 async function loadAllSubtasks() {
-  const tasks = allTasks.value.filter(t => /^\d+$/.test(t.id))
+  const tasks = parentStore.parentTaskTemplates.filter(t => /^\d+$/.test(t.id))
   if (!tasks.length) return
   await Promise.allSettled(tasks.map(async (t) => {
     try {
@@ -415,62 +527,7 @@ async function loadAllSubtasks() {
   }))
 }
 
-const downloading = ref(false)
-
-const selectedChildName = computed(() =>
-  childSelectStore.selectedChild?.name ?? userStore.profile.name ?? '我的'
-)
-
-async function downloadPrint() {
-  if (downloading.value) return
-  downloading.value = true
-  try {
-    const element = document.getElementById('print-area')
-    if (!element) return
-
-    // Dynamically load html2canvas + jspdf from CDN
-    const html2canvas = (await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', 'html2canvas'))
-    const { jsPDF } = (await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'jspdf'))
-
-    // Wait a tick for fonts/layout to settle
-    await new Promise(r => setTimeout(r, 200))
-
-    const canvas = await html2canvas(element, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-    })
-
-    const pdf = new jsPDF('p', 'mm', 'a4')
-    const pdfWidth = pdf.internal.pageSize.getWidth()
-    const pdfHeight = (canvas.height * pdfWidth) / canvas.width
-
-    let remainingHeight = pdfHeight
-    let srcY = 0
-    const pageHeight = pdf.internal.pageSize.getHeight()
-
-    while (remainingHeight > 0) {
-      const pageCanvas = document.createElement('canvas')
-      pageCanvas.width = canvas.width
-      pageCanvas.height = Math.min(canvas.width * pageHeight / pdfWidth, canvas.height - srcY)
-      const ctx = pageCanvas.getContext('2d')!
-      ctx.drawImage(canvas, 0, srcY, canvas.width, pageCanvas.height, 0, 0, canvas.width, pageCanvas.height)
-      const pageData = pageCanvas.toDataURL('image/png')
-
-      if (srcY > 0) pdf.addPage()
-      pdf.addImage(pageData, 'PNG', 0, 0, pdfWidth, (pageCanvas.height * pdfWidth) / canvas.width)
-      srcY += pageCanvas.height
-      remainingHeight -= pageCanvas.height
-    }
-
-    pdf.save(`${selectedChildName.value}的每日打卡清单_第${taskStore.currentWeekHabit.weekNumber}周.pdf`)
-  } catch {
-    alert('下载失败，请检查网络连接后重试')
-  } finally {
-    downloading.value = false
-  }
-}
+const allTasks = computed(() => parentStore.parentTaskTemplates.filter(t => t.active !== false))
 
 function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -490,6 +547,55 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
     document.head.appendChild(script)
   })
 }
+
+async function downloadPdf() {
+  if (downloading.value) return
+  downloading.value = true
+  try {
+    const element = document.getElementById('printable-sheet-pdf')
+    if (!element) return
+
+    const html2canvas = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', 'html2canvas')
+    const { jsPDF } = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'jspdf')
+
+    await new Promise(r => setTimeout(r, 300))
+
+    const canvas = await html2canvas(element, {
+      scale: 3,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+    })
+
+    const pdf = new jsPDF('p', 'mm', 'a4')
+    const pdfWidth = pdf.internal.pageSize.getWidth()
+    const pdfHeight = (canvas.height * pdfWidth) / canvas.width
+
+    let srcY = 0
+    let remainingHeight = pdfHeight
+    const pageHeight = pdf.internal.pageSize.getHeight()
+
+    while (remainingHeight > 0) {
+      const pageCanvas = document.createElement('canvas')
+      pageCanvas.width = canvas.width
+      pageCanvas.height = Math.min(canvas.width * pageHeight / pdfWidth, canvas.height - srcY)
+      const ctx = pageCanvas.getContext('2d')!
+      ctx.drawImage(canvas, 0, srcY, canvas.width, pageCanvas.height, 0, 0, canvas.width, pageCanvas.height)
+      const pageData = pageCanvas.toDataURL('image/png')
+
+      if (srcY > 0) pdf.addPage()
+      pdf.addImage(pageData, 'PNG', 0, 0, pdfWidth, (pageCanvas.height * pdfWidth) / canvas.width)
+      srcY += pageCanvas.height
+      remainingHeight -= pageCanvas.height
+    }
+
+    pdf.save(`${userStore.profile.name || '孩子'}的每日任务与习惯清单.pdf`)
+  } catch {
+    alert('下载失败，请检查网络连接后重试')
+  } finally {
+    downloading.value = false
+  }
+}
 </script>
 
 <template>
@@ -500,30 +606,32 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
     <section class="page-hero">
       <div class="hero-card">
         <span class="eyebrow">📋 任务与习惯管理</span>
-        <h1>管理任务模板和核心习惯</h1>
-        <p class="lead">创建每日任务模板，设定每周主线习惯 SOP，所有内容会同步到孩子的打卡页面。完成后可在打印预览生成清单。</p>
+        <h1>管理任务和核心习惯</h1>
+        <p class="lead">创建每日任务，设定每周主线习惯 SOP，所有内容会同步到孩子的打卡页面。完成后可在打印预览生成清单。</p>
+        <div style="margin-top:14px;display:flex;gap:10px">
+          <button class="btn secondary" :disabled="downloading" @click="downloadPdf">
+            {{ downloading ? '⏳ 生成中...' : '📥 导出 PDF' }}
+          </button>
+        </div>
       </div>
       <div class="panel" style="display:flex;flex-direction:column;justify-content:center">
         <div class="card-title">
           <h2>概览</h2>
-          <span class="tag">{{ allTasks.length }} 个任务 · {{ taskStore.currentWeekHabit.steps.length }} 个步骤</span>
+          <span class="tag">{{ allTasks.length }} 个任务 · {{ taskStore.habits.reduce((s, h) => s + h.steps.length, 0) }} 个步骤</span>
         </div>
         <div class="stat-row">
           <div class="mini-stat">
             <strong>{{ allTasks.length }}</strong>
-            <span>任务模板</span>
+            <span>任务</span>
           </div>
           <div class="mini-stat">
-            <strong>{{ taskStore.currentWeekHabit.title || '—' }}</strong>
-            <span>当前习惯</span>
+            <strong>{{ taskStore.habits.length }}</strong>
+            <span>习惯总数</span>
           </div>
+
           <div class="mini-stat">
-            <strong>第 {{ taskStore.currentWeekHabit.weekNumber }} 周</strong>
-            <span>习惯周数</span>
-          </div>
-          <div class="mini-stat">
-            <strong>{{ taskStore.habitHistory.length }}</strong>
-            <span>历史习惯</span>
+            <strong>{{ taskStore.habits.reduce((s, h) => s + h.steps.length, 0) }}</strong>
+            <span>总步骤数</span>
           </div>
         </div>
       </div>
@@ -531,7 +639,7 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
 
     <!-- Tab Bar -->
     <section class="tab-bar-section">
-      <div class="tab-bar-manager">
+      <div class="tab-bar-manager two-tabs">
         <button
           class="tab-btn"
           :class="{ active: activeTab === 'tasks' }"
@@ -545,13 +653,6 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
           @click="activeTab = 'habits'"
         >
           ✅ 习惯管理
-        </button>
-        <button
-          class="tab-btn"
-          :class="{ active: activeTab === 'print' }"
-          @click="switchToPrint()"
-        >
-          🖨️ 打印预览
         </button>
         <div class="tab-slider-manager" :class="`slide-${activeTab}`" />
       </div>
@@ -570,8 +671,16 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
             <input v-model="title" class="input" style="margin-top:6px" placeholder="例如：晨间朗读 10 分钟" />
           </label>
           <label style="display:block;font-weight:800;margin-top:14px;margin-bottom:6px">
-            任务描述
-            <input v-model="description" class="input" style="margin-top:6px" placeholder="具体要求和步骤说明" />
+            适用日期
+            <button
+              type="button"
+              class="btn weekday-btn"
+              style="margin-top:6px;width:100%"
+              @click="showWeekdayPicker = true"
+            >
+              {{ weekDayToLabel(taskWeekDay) }}
+            </button>
+            <WeekdayPicker v-model="taskWeekDay" v-model:visible="showWeekdayPicker" />
           </label>
           <div class="grid-2" style="margin-top:14px">
             <label style="font-weight:800">
@@ -591,6 +700,9 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
               <button v-for="ico in iconOptions" :key="ico" class="icon-btn" :class="{ active: icon === ico }" @click="icon = ico">{{ ico }}</button>
             </div>
           </label>
+          <label style="display:block;margin-top:14px;margin-bottom:6px">
+            <input v-model="description" class="input" style="margin-top:6px" placeholder="任务描述（可选）" />
+          </label>
           <button class="btn" style="margin-top:20px;width:100%" :disabled="!title.trim()" @click="createTask">✨ 创建任务</button>
         </div>
 
@@ -607,23 +719,45 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
               :class="{ 'task-row-active': expandedTaskId === template.id }"
               @click="showSubTasks(template.id)"
             >
-              <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
-                <span style="font-size:28px;flex-shrink:0">{{ template.icon }}</span>
-                <div style="min-width:0">
-                  <strong>{{ template.title }}</strong>
-                  <span class="muted" style="display:block;font-size:13px">{{ template.description || '无描述' }}</span>
-                  <div style="display:flex;gap:6px;margin-top:4px">
-                    <span class="mini-tag">{{ categoryOptions.find(c => c.value === template.type)?.label || template.type }}</span>
-                    <span class="mini-tag">☀️ +{{ template.rewardPoints }}</span>
+              <template v-if="taskEditId === template.id">
+                <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:0">
+                  <input v-model="taskEditTitle" class="input" placeholder="任务标题" @keyup.enter="saveEdit(template.id)" />
+                  <input v-model="taskEditDesc" class="input" placeholder="任务描述" @keyup.enter="saveEdit(template.id)" />
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <select v-model="taskEditType" class="input" style="flex:1;min-width:100px">
+                      <option v-for="cat in categoryOptions" :key="cat.value" :value="cat.value">{{ cat.icon }} {{ cat.label }}</option>
+                    </select>
+                    <input v-model.number="taskEditPoints" class="input" type="number" min="5" max="100" step="5" style="width:80px" />
+                    <div class="icon-picker" style="display:flex;gap:4px;flex-wrap:wrap">
+                      <button v-for="ico in iconOptions" :key="ico" class="icon-btn-sm" :class="{ active: taskEditIcon === ico }" @click="taskEditIcon = ico">{{ ico }}</button>
+                    </div>
+                  </div>
+                  <div style="display:flex;gap:6px">
+                    <button class="btn" style="padding:4px 14px;font-size:13px" @click="saveEdit(template.id)">保存</button>
+                    <button class="btn ghost" style="padding:4px 14px;font-size:13px" @click="cancelEdit">取消</button>
                   </div>
                 </div>
-              </div>
-              <div style="display:flex;gap:6px;flex-shrink:0;align-items:center" @click.stop>
-                <button class="btn ghost" style="padding:6px 12px;font-size:13px" @click="deleteTask(template.id)">删除</button>
-              </div>
+              </template>
+              <template v-else>
+                <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+                  <span style="font-size:28px;flex-shrink:0">{{ template.icon }}</span>
+                  <div style="min-width:0">
+                    <strong>{{ template.title }}</strong>
+                    <span class="muted" style="display:block;font-size:13px">{{ template.description || '无描述' }}</span>
+                    <div style="display:flex;gap:6px;margin-top:4px">
+                      <span class="mini-tag">{{ categoryOptions.find(c => c.value === template.type)?.label || template.type }}</span>
+                      <span class="mini-tag">☀️ +{{ template.rewardPoints }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:6px;flex-shrink:0;align-items:center" @click.stop>
+                  <button class="btn ghost" style="padding:6px 12px;font-size:13px" @click="startEdit(template)">编辑</button>
+                  <button class="btn ghost" style="padding:6px 12px;font-size:13px" @click="deleteTask(template.id)">删除</button>
+                </div>
+              </template>
             </div>
           </div>
-          <p v-else class="muted" style="text-align:center;padding:32px">还没有创建任务模板。在左侧表单中创建第一个任务吧 ✨</p>
+          <p v-else class="muted" style="text-align:center;padding:32px">还没有创建任务。在左侧表单中创建第一个任务吧 ✨</p>
         </div>
       </div>
     </section>
@@ -637,7 +771,7 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
           <button class="btn ghost" style="padding:6px 14px;font-size:13px" @click="expandedTaskId = null">关闭</button>
         </div>
         <p class="lead" style="font-size:14px;margin-bottom:12px">
-          子任务用于区分同一任务在<b>平时</b>和<b>周末</b>的不同内容。选择任务时即包含其下所有子任务。
+          子任务默认继承任务的适用日期，每个子任务也可以单独调整。子任务仅在匹配的日期显示给孩子。
         </p>
 
         <!-- Existing sub-tasks (draggable) -->
@@ -668,7 +802,8 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
               <strong>{{ sub.title }}</strong>
               <div style="display:flex;gap:6px;margin-top:4px">
                 <span class="mini-tag">{{ categoryOptions.find(c => c.value === sub.type)?.label || sub.type }}</span>
-                <span class="mini-tag">{{ subtaskWeekDayLabel(sub.weekDay) }}</span>
+                <span class="mini-tag">{{ weekDayToLabel(sub.weekDay) }}</span>
+
               </div>
             </div>
             <button class="btn ghost" style="padding:4px 10px;font-size:12px;color:#c00" @click="removeSubtask(expandedTaskId!, sub.id)">删除</button>
@@ -688,17 +823,27 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
             <option value="">继承任务类别 ({{ categoryOptions.find(c => c.value === parentStore.parentTaskTemplates.find(t => t.id === expandedTaskId)?.type)?.label }})</option>
             <option v-for="cat in categoryOptions" :key="cat.value" :value="cat.value">{{ cat.icon }} {{ cat.label }}</option>
           </select>
-          <select v-model="newSubtaskWeekDay" class="input subtask-weekday-select">
-            <option value="">每天</option>
-            <option value="weekday">📅 平时</option>
-            <option value="weekend">🎉 周末</option>
-          </select>
+          <button
+            type="button"
+            class="btn ghost subtask-weekday-btn"
+            @click="showSubtaskWeekdayPicker = true"
+          >
+            {{ weekDayToLabel(newSubtaskWeekDay) }}
+          </button>
+          <WeekdayPicker v-model="newSubtaskWeekDay" v-model:visible="showSubtaskWeekdayPicker" />
           <button
             class="btn"
             :disabled="!newSubtaskTitle.trim()"
             @click="addSubtask(expandedTaskId!)"
           >
             + 添加
+          </button>
+          <button
+            class="btn secondary"
+            style="font-size:13px;padding:4px 12px"
+            @click="openSubTaskPicker"
+          >
+            📦 从库选择
           </button>
         </div>
       </div>
@@ -709,138 +854,145 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
       <div class="grid-2">
         <div class="panel">
           <div class="card-title">
-            <h2>编辑当前习惯</h2>
-            <button class="btn secondary" @click="saveHabit">保存</button>
+            <h2>所有习惯</h2>
+            <span class="tag">{{ taskStore.habits.length }} 个</span>
           </div>
-          <label style="font-weight:800;display:block;margin-bottom:4px">习惯名称</label>
-          <input v-model="editTitle" class="input" style="margin-bottom:12px" placeholder="习惯名称" />
-          <label style="font-weight:800;display:block;margin-bottom:4px">周数</label>
-          <input v-model.number="editWeek" class="input" type="number" min="1" style="margin-bottom:16px;width:120px" />
+          <p class="lead" style="font-size:14px;margin-bottom:12px">点击习惯名称展开编辑，所有习惯并列展示给孩子。</p>
+          <div v-if="taskStore.habits.length" class="list">
+            <div v-for="habit in taskStore.habits" :key="habit.id" class="list-row" style="flex-direction:column;align-items:stretch;gap:8px;cursor:pointer" @click="startEditHabit(habit.id)">
+              <div style="display:flex;align-items:center;gap:12px">
+                <strong :style="{ flex: 1, color: editingHabitId === habit.id ? 'var(--primary)' : '' }">{{ habit.title }}</strong>
+                <span class="muted" style="font-size:13px">{{ habit.steps.length }} 步 · ☀️ +{{ habit.rewardPoints }}/步</span>
+                <button class="btn ghost" style="padding:4px 10px;font-size:12px;color:#c00" @click.stop="deleteHabit(habit.id, habit.title)">删除</button>
+              </div>
+              <!-- Expanded editor -->
+              <div v-if="editingHabitId === habit.id" class="habit-editor" style="padding:12px;background:var(--bg);border-radius:12px;margin-top:4px" @click.stop>
+                <div class="card-title" style="margin-bottom:8px">
+                  <h3>编辑习惯</h3>
+                  <button class="btn secondary" style="font-size:13px;padding:4px 14px" @click="saveHabit">保存</button>
+                </div>
+                <label style="font-weight:800;display:block;margin-bottom:4px;font-size:13px">习惯名称</label>
+                <input v-model="editTitle" class="input" style="margin-bottom:10px" placeholder="习惯名称" />
+                <label style="font-weight:800;display:block;margin-bottom:4px;font-size:13px">每步奖励阳光值</label>
+                <input v-model.number="editRewardPoints" class="input" type="number" min="1" max="100" step="1" style="margin-bottom:12px;width:100px" />
 
-          <h3 style="margin:16px 0 10px">步骤列表</h3>
-          <div v-if="taskStore.currentWeekHabit.steps.length" class="list" style="margin-bottom:12px">
-            <div v-for="(step, index) in taskStore.currentWeekHabit.steps" :key="index" class="list-row" style="justify-content:flex-start;gap:12px">
-              <b class="step-num">{{ step.order }}</b>
-              <span style="flex:1">{{ step.instruction }}</span>
-              <button class="btn ghost" style="padding:6px 12px;font-size:12px;color:#c00" @click="removeStep(index)">删除</button>
+                <h4 style="margin:12px 0 8px;font-size:13px">步骤</h4>
+                <div v-if="habit.steps.length" class="list" style="margin-bottom:8px">
+                  <div v-for="(step, sIdx) in habit.steps" :key="sIdx" class="list-row" style="justify-content:flex-start;gap:10px;padding:6px 10px">
+                    <b class="step-num" style="width:24px;height:24px;font-size:12px">{{ step.order }}</b>
+                    <span style="flex:1;font-size:14px">{{ step.instruction }}</span>
+                    <button class="btn ghost" style="padding:4px 8px;font-size:11px;color:#c00" @click="removeStep(habit.id, sIdx)">删除</button>
+                  </div>
+                </div>
+                <p v-else class="muted" style="text-align:center;padding:8px;font-size:13px">暂无步骤</p>
+                <div style="display:flex;gap:6px">
+                  <input v-model="newStep" class="input" style="font-size:13px" placeholder="新步骤说明" @keyup.enter="addStep" />
+                  <button class="btn" style="font-size:13px;padding:4px 12px" :disabled="!newStep.trim()" @click="addStep">添加</button>
+                  <button class="btn secondary" style="font-size:13px;padding:4px 12px" @click="openStepPicker">📦 从库选择</button>
+                </div>
+              </div>
             </div>
           </div>
-          <p v-else class="muted" style="text-align:center;padding:12px">暂无步骤，请添加</p>
-
-          <div style="display:flex;gap:8px">
-            <input v-model="newStep" class="input" placeholder="新步骤说明" @keyup.enter="addStep" />
-            <button class="btn" :disabled="!newStep.trim()" @click="addStep">添加</button>
-          </div>
+          <p v-else class="muted" style="text-align:center;padding:24px">暂无习惯，请在右侧创建第一个习惯 ✨</p>
         </div>
 
         <div class="panel">
           <div class="card-title">
             <h2>创建新习惯</h2>
-            <span class="tag">当前第 {{ taskStore.currentWeekHabit.weekNumber }} 周</span>
           </div>
-          <p class="lead" style="margin-bottom:12px;font-size:14px">创建后将自动归档当前习惯到历史记录。</p>
+          <p class="lead" style="margin-bottom:12px;font-size:14px">新习惯会直接添加到列表中，所有习惯并列展示。</p>
           <div style="display:flex;gap:8px">
-            <input v-model="newHabitTitle" class="input" placeholder="新习惯名称（如：整理书包 SOP）" @keyup.enter="createHabit" />
+            <input v-model="newHabitTitle" class="input" placeholder="习惯名称（如：整理书包 SOP）" @keyup.enter="createHabit" />
             <button class="btn secondary" :disabled="!newHabitTitle.trim()" @click="createHabit">创建</button>
-          </div>
-
-          <h3 style="margin:24px 0 10px">历史习惯</h3>
-          <div v-if="taskStore.habitHistory.length" class="list">
-            <div v-for="habit in taskStore.habitHistory" :key="habit.id" class="list-row" :style="{ cursor: 'pointer' }" @click="loadHistory(habit.id)">
-              <div>
-                <strong>{{ habit.title }}</strong>
-                <span class="muted" style="display:block;font-size:13px">第 {{ habit.weekNumber }} 周 · {{ habit.steps.length }} 个步骤</span>
-              </div>
-              <span class="tag" style="flex-shrink:0;font-size:12px">载入</span>
-            </div>
-          </div>
-          <p v-else class="muted" style="text-align:center;padding:16px;font-size:14px">暂无历史习惯。创建新习惯时当前习惯会自动归档。</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── Tab 3: Print Preview ── -->
-    <section v-show="activeTab === 'print'" class="print-tab">
-      <!-- Selector -->
-      <div class="panel" style="margin-bottom:18px">
-        <div class="card-title">
-          <h2>选择要打印的任务</h2>
-          <div style="display:flex;gap:8px">
-            <button class="btn ghost" style="padding:6px 14px;font-size:13px" @click="selectAllTasks">全选</button>
-            <button class="btn ghost" style="padding:6px 14px;font-size:13px" @click="deselectAllTasks">取消</button>
-          </div>
-        </div>
-        <div v-if="allTasks.length" class="task-select-grid">
-          <label v-for="task in allTasks" :key="task.id" class="task-check-card" :class="{ checked: selectedTaskIds.has(task.id) }">
-            <input type="checkbox" :checked="selectedTaskIds.has(task.id)" @change="toggleTaskSelection(task.id)" />
-            <span class="tci">{{ task.icon }}</span>
-            <div class="tci-text">
-              <strong>{{ task.title }}</strong>
-              <span class="muted">{{ task.description || '无描述' }}</span>
-            </div>
-            <span class="mini-tag">☀️ +{{ task.rewardPoints }}</span>
-          </label>
-        </div>
-        <p v-else class="muted" style="text-align:center;padding:20px">暂无任务模板，请先在「任务管理」中创建。</p>
-      </div>
-
-      <!-- Print Preview -->
-      <div class="panel print-panel">
-        <div class="card-title">
-          <h2>🖨️ 打印预览</h2>
-          <button class="btn" :disabled="downloading" @click="downloadPrint">
-            {{ downloading ? '⏳ 生成中...' : '📥 下载 PDF' }}
-          </button>
-        </div>
-
-        <div id="print-area" class="print-sheet">
-          <div class="print-header">
-            <h1>{{ selectedChildName }} 的每日打卡清单</h1>
-            <p class="print-date">生成日期：{{ new Date().toLocaleDateString('zh-CN') }} · 第 {{ taskStore.currentWeekHabit.weekNumber }} 周</p>
-          </div>
-
-          <!-- Habits Section -->
-          <div class="print-section">
-            <h2>本周习惯：{{ taskStore.currentWeekHabit.title }}</h2>
-            <div v-if="taskStore.currentWeekHabit.steps.length" class="print-steps">
-              <div v-for="step in taskStore.currentWeekHabit.steps" :key="step.order" class="print-step-row">
-                <span class="ps-order">{{ step.order }}</span>
-                <span class="ps-text">{{ step.instruction }}</span>
-                <span class="ps-check">□</span>
-              </div>
-            </div>
-            <p v-else class="muted">暂无习惯步骤。</p>
-          </div>
-
-          <!-- Tasks Section -->
-          <div class="print-section">
-            <h2>每日任务清单</h2>
-            <div v-if="printLoading" class="print-loading">
-              <p>⏳ 正在加载子任务数据...</p>
-            </div>
-            <div v-else-if="checklistItems.length" class="print-tasks-vertical">
-              <div v-for="item in checklistItems" :key="item.id" class="ptr-row">
-                <div class="ptr-info">
-                  <strong>{{ item.title }}</strong>
-                  <span class="muted">{{ item.description }}</span>
-                  <div style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap">
-                    <span v-if="item.type" class="ptr-sub-badge">{{ categoryOptions.find(c => c.value === item.type)?.label || item.type }}</span>
-                    <span v-if="item.weekDay" class="ptr-sub-badge ptr-sub-day">{{ subtaskWeekDayLabel(item.weekDay) }}</span>
-                  </div>
-                </div>
-                <span class="ptr-check">□</span>
-              </div>
-            </div>
-            <p v-else class="muted">所选任务暂无子任务，请先在「任务管理」中添加子任务。</p>
-          </div>
-
-          <div class="print-footer">
-            <p>每天完成后打 ✓，周末拍照上传</p>
           </div>
         </div>
       </div>
     </section>
   </div>
+
+    <!-- ── Sub-task Picker Modal ── -->
+    <InventoryPickerModal
+      :visible="subTaskPickerVisible"
+      type="subtask"
+      :items="subTaskLibrary"
+      @close="subTaskPickerVisible = false"
+      @select="onSubTaskSelected"
+    />
+
+    <!-- ── Step Picker Modal ── -->
+    <InventoryPickerModal
+      :visible="stepPickerVisible"
+      type="step"
+      :items="stepLibrary"
+      @close="stepPickerVisible = false"
+      @select="onStepSelected"
+    />
+
+    <!-- ── PDF Printable Sheet (hidden) ── -->
+    <div id="printable-sheet-pdf" class="pdf-sheet">
+      <div class="pdf-top">
+        <div class="pdf-title-row">
+          <h1>每日计划清单</h1>
+          <div class="pdf-info">
+            <span>{{ userStore.profile.name || '______' }}</span>
+            <span class="pdf-dot">·</span>
+            <span>{{ userStore.profile.grade ? userStore.profile.grade + '年级' : '______' }}</span>
+            <span class="pdf-dot">·</span>
+            <span>{{ dateStr }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="pdf-body">
+        <div class="pdf-col">
+          <h2 class="pdf-col-title">📋 今日任务</h2>
+          <div v-if="allTasks.length" class="pdf-items">
+            <div v-for="task in allTasks" :key="task.id" class="pdf-item">
+              <div class="pdf-item-top">
+                <span class="pdf-box">□</span>
+                <span class="pdf-item-icon">{{ task.icon }}</span>
+                <span class="pdf-item-label">{{ task.title }}</span>
+                <span class="pdf-item-pts">+{{ task.rewardPoints }}</span>
+              </div>
+              <div v-if="task.subTasks?.length" class="pdf-subs">
+                <div v-for="sub in task.subTasks" :key="sub.id" class="pdf-sub">
+                  <span class="pdf-box pdf-box-sm">□</span>
+                  <span>{{ sub.title }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="pdf-item pdf-item-note">
+              <div class="pdf-item-top">
+                <span class="pdf-box">□</span>
+                <span class="pdf-item-icon">💬</span>
+                <span class="pdf-item-label">家长寄语</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="pdf-empty">暂无任务</div>
+        </div>
+
+        <div class="pdf-col">
+          <h2 class="pdf-col-title">🌱 每日习惯</h2>
+          <div v-if="taskStore.habits.length" class="pdf-items">
+            <div v-for="habit in taskStore.habits" :key="habit.id" class="pdf-habit-block">
+              <div class="pdf-habit-head">
+                <span>{{ habit.title }}</span>
+                <span class="pdf-item-pts">+{{ habit.rewardPoints }}/步</span>
+              </div>
+              <div v-if="habit.steps.length" class="pdf-subs">
+                <div v-for="step in habit.steps" :key="step.order" class="pdf-sub">
+                  <span class="pdf-box pdf-box-sm">□</span>
+                  <span>{{ step.instruction }}</span>
+                </div>
+              </div>
+              <div v-else class="pdf-empty" style="padding:4px 0;border:none">暂未设置步骤</div>
+            </div>
+          </div>
+          <div v-else class="pdf-empty">暂无习惯</div>
+        </div>
+      </div>
+    </div>
 </template>
 
 <style scoped>
@@ -870,10 +1022,13 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
   transition: color 0.2s;
 }
 .tab-btn.active { color: #2e7d32; }
+.tab-bar-manager.two-tabs {
+  grid-template-columns: 1fr 1fr;
+}
 .tab-slider-manager {
   position: absolute;
   top: 6px; bottom: 6px;
-  width: calc(33.333% - 8px);
+  width: calc(50% - 8px);
   background: #fff;
   border-radius: 14px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
@@ -881,7 +1036,6 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
 }
 .tab-slider-manager.slide-tasks { transform: translateX(0); left: 6px; }
 .tab-slider-manager.slide-habits { transform: translateX(100%); left: 6px; }
-.tab-slider-manager.slide-print { transform: translateX(200%); left: 6px; }
 
 /* ── Task Row ── */
 .task-row {
@@ -1050,202 +1204,202 @@ function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
   font-weight: 700;
 }
 
-/* ── Task Select Grid (Print Tab) ── */
-.task-select-grid {
-  display: grid;
-  gap: 8px;
-}
-.task-check-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 2px solid var(--line);
-  background: #fff;
-  cursor: pointer;
-  transition: all .12s ease;
-}
-.task-check-card:hover {
-  border-color: var(--primary-2);
-  background: #f6fddc;
-}
-.task-check-card.checked {
-  border-color: var(--primary);
-  background: #ecffd9;
-}
-.task-check-card input { display: none; }
-.tci { font-size: 28px; flex-shrink: 0; }
-.tci-text { flex: 1; min-width: 0; }
-.tci-text strong { display: block; font-size: 15px; }
-.tci-text .muted { font-size: 13px; }
-
-/* ── Print Preview ── */
-.print-panel {
-  border: 2px dashed var(--line);
-}
-.print-sheet {
-  background: #fff;
-  border-radius: 20px;
-  padding: 36px;
-  box-shadow: 0 8px 28px rgba(0,0,0,0.06);
-  border: 1px solid #eee;
-}
-@media print {
-  .print-sheet {
-    box-shadow: none;
-    border: 0;
-    border-radius: 0;
-    padding: 20px;
-  }
-  .ps-check,
-  .ptr-check {
-    font-size: 26px !important;
-    color: #000 !important;
-  }
-  .ptr-row {
-    border-bottom-color: #ccc !important;
-  }
-  .ptr-sub-badge {
-    background: #e8f5e9 !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  .print-step-row {
-    border-bottom-color: #ccc !important;
-  }
-  .print-header {
-    border-bottom-color: #000 !important;
-  }
-}
-.print-header {
-  text-align: center;
-  border-bottom: 3px solid var(--primary);
-  padding-bottom: 18px;
-  margin-bottom: 24px;
-}
-.print-header h1 {
-  font-size: 26px;
-  color: var(--primary);
-  margin: 0 0 6px;
-}
-.print-date {
-  color: var(--muted);
-  font-size: 14px;
-  margin: 0;
-}
-.print-section {
-  margin-bottom: 24px;
-}
-.print-section h2 {
-  font-size: 18px;
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.print-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.print-step-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-bottom: 1px solid #e0e0e0;
-}
-.print-step-row:last-child {
-  border-bottom: none;
-}
-.ps-order {
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  background: var(--primary);
-  color: #fff;
-  display: grid;
-  place-items: center;
-  font-weight: 900;
-  font-size: 14px;
-  flex-shrink: 0;
-}
-.ps-text { flex: 1; font-weight: 600; }
-.ps-check { font-size: 28px; color: #111; line-height: 1; }
-
-/* ── Vertical Task Checklist ── */
-.print-tasks-vertical {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ptr-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #e0e0e0;
-}
-.ptr-row:last-child {
-  border-bottom: none;
-}
-.ptr-check {
-  font-size: 30px;
-  line-height: 1;
-  color: #111;
-  flex-shrink: 0;
-}
-.ptr-info {
-  flex: 1;
-  min-width: 0;
-}
-.ptr-info strong {
-  display: block;
-  font-size: 16px;
-}
-.ptr-info .muted {
-  display: block;
-  font-size: 13px;
-  color: #666;
-  margin-top: 2px;
-}
-.ptr-sub-badge {
-  font-size: 10px;
-  background: #e8f5e9;
-  color: #2e7d32;
-  padding: 1px 6px;
-  border-radius: 999px;
-  font-weight: 700;
-}
-.ptr-sub-day {
-  background: #fff3e0;
-  color: #e65100;
-}
-
-.print-loading {
-  text-align: center;
-  padding: 32px 16px;
-  color: var(--muted);
-  font-size: 15px;
-}
-
-.print-footer {
-  text-align: center;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 13px;
-}
-
 button:disabled {
   opacity: .5;
   cursor: not-allowed;
+}
+.weekday-btn {
+  background: #e3f2fd;
+  border: 2px solid #90caf9;
+  color: #1565c0;
+  font-weight: 800;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 15px;
+  box-shadow: none;
+  transition: all .12s ease;
+}
+.weekday-btn:hover {
+  background: #bbdefb;
+  box-shadow: none;
+  transform: none;
+}
+.icon-btn-sm {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 2px solid var(--line);
+  background: #fff;
+  font-size: 16px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all .12s ease;
+  padding: 0;
+}
+.icon-btn-sm:hover {
+  border-color: var(--primary);
+  background: #ecffd9;
+}
+.icon-btn-sm.active {
+  border-color: var(--primary);
+  background: #d9f5c8;
 }
 
 @media (max-width: 900px) {
   .stat-row { grid-template-columns: repeat(2, 1fr); }
   .tab-btn { font-size: 13px; padding: 12px 8px; }
+}
+
+/* ── PDF Printable Sheet (hidden from screen) ── */
+.pdf-sheet {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 794px;
+  background: #fff;
+  color: #1a1a1a;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 32px 36px;
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  line-height: 1.6;
+}
+
+/* ── Top Header ── */
+.pdf-top {
+  border-bottom: 2px solid #333;
+  padding-bottom: 14px;
+  margin-bottom: 20px;
+}
+.pdf-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pdf-title-row h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+  color: #1a1a1a;
+}
+.pdf-info {
+  font-size: 13px;
+  color: #555;
+  font-weight: 500;
+}
+.pdf-dot {
+  margin: 0 6px;
+  color: #bbb;
+}
+
+/* ── Two-Column Body ── */
+.pdf-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.pdf-col {
+  min-width: 0;
+}
+.pdf-col-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #ccc;
+  color: #1a1a1a;
+}
+
+/* ── Task & Habit Items ── */
+.pdf-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pdf-item {
+  border: 1px solid #ccc;
+  padding: 8px 10px;
+}
+.pdf-item-note {
+  border-style: dashed;
+  opacity: .7;
+}
+.pdf-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pdf-box {
+  font-size: 16px;
+  color: #333;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.pdf-box-sm {
+  font-size: 13px;
+}
+.pdf-item-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.pdf-item-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+}
+.pdf-item-pts {
+  font-size: 11px;
+  color: #888;
+  flex-shrink: 0;
+}
+
+/* ── Subtasks ── */
+.pdf-subs {
+  margin-top: 4px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pdf-sub {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #444;
+}
+
+/* ── Habit Block ── */
+.pdf-habit-block {
+  border: 1px solid #ccc;
+  padding: 8px 10px;
+}
+.pdf-habit-block + .pdf-habit-block {
+  margin-top: 4px;
+}
+.pdf-habit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #ddd;
+}
+
+/* ── Empty ── */
+.pdf-empty {
+  text-align: center;
+  padding: 20px;
+  color: #bbb;
+  font-size: 13px;
+  border: 1px dashed #ddd;
 }
 </style>

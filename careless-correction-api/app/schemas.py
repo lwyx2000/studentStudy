@@ -11,6 +11,7 @@ class UserOut(BaseModel):
     grade: int | None = None
     avatar_url: str | None = None
     sunlight_points: int = 0
+    apples: int = 0
     streak_days: int = 0
     is_onboarded: bool = False
     fk_users_parent: int | None = None
@@ -25,6 +26,7 @@ class ChildOut(BaseModel):
     grade: int | None = None
     avatar_url: str | None = None
     sunlight_points: int = 0
+    apples: int = 0
     streak_days: int = 0
     is_onboarded: bool = False
 
@@ -54,9 +56,12 @@ class TaskOut(BaseModel):
     status: str = 'pending'
     reward_points: int = 10
     icon: str | None = None
+    week_day: str | None = None
     assigned_date: date
     completed_at: datetime | None = None
     completion_photo_url: str | None = None
+    active: bool = True
+    created_at: datetime | None = None
     sub_tasks: list[SubTaskOut] = []
 
     model_config = {'from_attributes': True}
@@ -65,7 +70,6 @@ class TaskOut(BaseModel):
 class HabitOut(BaseModel):
     pk_habit_sops: int
     title: str
-    week_number: int
     grade_range: str
     difficulty_level: int
     created_at: datetime | None = None
@@ -95,6 +99,8 @@ class MistakeOut(BaseModel):
     category: str | None = None
     knowledge_point: str | None = None
     grade: int | None = None
+    review_strategy: str = '3day-repeat'
+    next_review_at: datetime | None = None
     review_count: int = 0
     resolved: bool = False
     created_at: datetime | None = None
@@ -135,6 +141,16 @@ class SunlightHistoryOut(BaseModel):
     model_config = {'from_attributes': True}
 
 
+class AppleHistoryOut(BaseModel):
+    pk_apple_history: int
+    amount: int
+    reason: str
+    type: str
+    created_at: datetime | None = None
+
+    model_config = {'from_attributes': True}
+
+
 class RewardItemOut(BaseModel):
     pk_reward_items: int
     name: str
@@ -156,17 +172,6 @@ class BadgeOut(BaseModel):
     unlocked: bool = False
     unlocked_at: datetime | None = None
     reward_points: int = 50
-
-    model_config = {'from_attributes': True}
-
-
-class CovenantOut(BaseModel):
-    pk_covenants: int
-    goal: str
-    reward: str
-    reward_type: str
-    status: str = 'draft'
-    created_at: datetime | None = None
 
     model_config = {'from_attributes': True}
 
@@ -208,26 +213,11 @@ class LlmConfigOut(BaseModel):
 
 class ParentSettingsOut(BaseModel):
     pk_parent_settings: int | None = None
-    difficulty_level: int = 2
     daily_reminder: bool = True
     achievement_notification: bool = True
     weekly_report: bool = True
     school_sync: bool = False
     school_sync_code: str | None = None
-
-    model_config = {'from_attributes': True}
-
-
-class DiscussionPostOut(BaseModel):
-    pk_community_posts: int
-    title: str
-    content: str
-    tags: dict | None = None
-    reply_count: int = 0
-    like_count: int = 0
-    has_expert_answer: bool = False
-    is_anonymous: bool = True
-    created_at: datetime | None = None
 
     model_config = {'from_attributes': True}
 

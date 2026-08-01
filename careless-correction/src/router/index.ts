@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getAuthToken } from '../utils/api'
+import { useUserStore } from '../stores'
 
 const routes = [
   {
@@ -46,7 +47,7 @@ const routes = [
   {
     path: '/badge',
     name: 'BadgeRoom',
-    component: () => import('../views/child/FamilyCovenantBadgeRoom.vue'),
+    component: () => import('../views/child/BadgeRoom.vue'),
   },
   {
     path: '/sunlight',
@@ -55,8 +56,7 @@ const routes = [
   },
   {
     path: '/printable',
-    name: 'PrintableChecklist',
-    component: () => import('../views/child/A4PrintableChecklist.vue'),
+    redirect: '/habit',
   },
   // 家长端
   {
@@ -72,10 +72,9 @@ const routes = [
     meta: { parentOnly: true },
   },
   {
-    path: '/parent/garden',
-    name: 'CommunityGarden',
-    component: () => import('../views/parent/CommunityGarden.vue'),
-    meta: { parentOnly: true },
+    path: '/tree',
+    name: 'SunshineTree',
+    component: () => import('../views/child/SunshineTree.vue'),
   },
   {
     path: '/parent/tasks',
@@ -113,6 +112,12 @@ const routes = [
     component: () => import('../views/parent/LlmConfig.vue'),
     meta: { parentOnly: true },
   },
+  {
+    path: '/parent/inventory',
+    name: 'TaskHabitInventory',
+    component: () => import('../views/parent/TaskHabitInventory.vue'),
+    meta: { parentOnly: true },
+  },
 ]
 
 const router = createRouter({
@@ -120,7 +125,7 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const token = getAuthToken()
 
   // 公开路由直接放行
@@ -129,14 +134,13 @@ router.beforeEach((to) => {
   // 未登录跳登录页
   if (!token) return '/login'
 
-  // 家长专属路由：需要从 store 判断角色
-  // 这里用 localStorage 存的 profile 快速判断，避免循环依赖
   if (to.meta.parentOnly) {
     try {
-      const saved = localStorage.getItem('cc-user')
-      const profile = saved ? JSON.parse(saved)?.profile : null
-      if (profile?.role !== 'parent') return '/dashboard'
-    } catch { /* 跳过 */ }
+      const store = useUserStore()
+      // 刷新页面时 store 的 role 默认是 'child'，主动从 API 加载真实数据
+      await store.fetchFromApi()
+      if (store.profile.role !== 'parent') return '/dashboard'
+    } catch { return '/dashboard' }
   }
 
   return true

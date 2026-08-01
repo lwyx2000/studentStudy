@@ -2,7 +2,7 @@
 MySQL 数据库迁移脚本
 
 用法：
-    python migrations/run_mysql.py
+    python migrations/legacy/run_mysql.py
 
 依赖 .env 中的 DB_HOST / DB_PORT / DB_USER / DB_PASSWORD / DB_NAME 配置
 """
@@ -13,7 +13,7 @@ import sys
 import pymysql
 
 # 尝试加载 .env
-dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
 if os.path.isfile(dotenv_path):
     with open(dotenv_path, encoding='utf-8') as f:
         for line in f:
@@ -41,7 +41,7 @@ def run():
             cursor.execute(f'CREATE DATABASE IF NOT EXISTS `{db_config["database"]}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci')
             cursor.execute(f'USE `{db_config["database"]}`')
 
-        sql_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '001_init_mysql.sql')
+        sql_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '001_init_mysql.sql')
         with open(sql_path, encoding='utf-8') as f:
             sql = f.read()
 

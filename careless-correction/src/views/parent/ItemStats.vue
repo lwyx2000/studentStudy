@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useChildSelectStore, useGrowthStore } from '../../stores'
+import { useGrowthStore } from '../../stores'
 import ChildSelector from '../../components/ChildSelector.vue'
 
 const growthStore = useGrowthStore()
-const childSelectStore = useChildSelectStore()
-const selectedChild = computed(() => childSelectStore.selectedChild)
 
 const totalLossItems = computed(() => growthStore.itemLossRecords.reduce((s, i) => s + i.frequency, 0))
 const totalStorage = computed(() => growthStore.storageRecords.length)

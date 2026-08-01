@@ -70,7 +70,55 @@ async def trigger_assessment(
         habit_title=habit.title if habit else '未设置',
     )
     result = await call_llm(config, prompt)
-    return {'assessment': result}
+
+    # ── 落库：写入成长快照与预警 ──
+    from datetime import date
+    completion_rate = round(done / total, 4)
+    mistake_rate = round(min(1.0, mistake_count / max(total, 1)), 4)
+
+    # 同一天同一 source 只保留一份快照（唯一约束 uq_growth_snapshot），重复评估时更新
+    today = date.today()
+    snapshot = (
+        db.query(GrowthSnapshot)
+        .filter(
+            GrowthSnapshot.fk_users == target.pk_users,
+            GrowthSnapshot.snapshot_date == today,
+            GrowthSnapshot.source == 'weekly',
+        )
+        .first()
+    )
+    if snapshot is None:
+        snapshot = GrowthSnapshot(
+            fk_users=target.pk_users,
+            snapshot_date=today,
+            source='weekly',
+        )
+        db.add(snapshot)
+    snapshot.mistake_rate = mistake_rate
+    snapshot.item_loss_rate = loss_count
+    snapshot.task_completion_rate = completion_rate
+    snapshot.focus_score = min(100, 60 + round(completion_rate * 30))
+    snapshot.neatness_score = min(100, 95 - min(30, loss_count * 3))
+    snapshot.metacognition_score = min(100, 55 + min(45, mistake_count * 2))
+    snapshot.emotion_score = min(100, 70 + round(completion_rate * 20))
+
+    # 生成一条预警：基于当前数据直接计算，避免依赖 LLM 返回格式
+    alert = DiagnosticAlert(
+        fk_users=target.pk_users,
+        title='本周成长提示',
+        description=(
+            f'本周完成任务 {done}/{total}（完成率 {round(completion_rate * 100)}%），'
+            f'累计错题 {mistake_count} 道，物品丢失 {loss_count} 次。'
+        ),
+        suggestion='继续保持每日打卡节奏；错题超过 10 道时建议重点复习错题本。',
+        severity='positive' if completion_rate >= 0.8 else 'warning',
+        related_metric='task_completion_rate',
+        metric_change=round(completion_rate * 100, 2),
+    )
+    db.add(alert)
+    db.commit()
+
+    return {'assessment': result, 'snapshot_created': True, 'alert_created': True}
 
 
 @router.get('/trend')

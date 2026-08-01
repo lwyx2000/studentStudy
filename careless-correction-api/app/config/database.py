@@ -1,5 +1,5 @@
 import os
-from urllib.parse import quote_plus
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -7,25 +7,18 @@ load_dotenv()
 
 
 class DatabaseConfig:
-    """数据库配置，优先从环境变量读取，使用默认值兜底"""
+    """数据库配置，使用本地 SQLite"""
 
-    host: str = 'localhost'
-    port: int = 3306
-    user: str = 'root'
-    password: str = ''
-    database: str = 'careless_correction'
+    db_path: str = ''
 
     def __init__(self):
-        self.host = os.getenv('DB_HOST', 'localhost')
-        self.port = int(os.getenv('DB_PORT', '3306'))
-        self.user = os.getenv('DB_USER', 'root')
-        raw_password = os.getenv('DB_PASSWORD', '')
-        self.password = quote_plus(raw_password) if raw_password else ''
-        self.database = os.getenv('DB_NAME', 'careless_correction')
+        # 默认在项目根目录下生成 data/app.db
+        default_path = str(Path(__file__).resolve().parent.parent.parent / 'data' / 'app.db')
+        self.db_path = os.getenv('DB_PATH', default_path)
 
     @property
     def url(self) -> str:
-        return f'mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}?charset=utf8mb4'
+        return f'sqlite:///{self.db_path}'
 
 
 db_config = DatabaseConfig()

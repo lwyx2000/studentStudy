@@ -7,6 +7,7 @@ export interface UserProfile {
   role: 'child' | 'parent'
   parentId?: string
   sunlightPoints?: number
+  apples?: number
   streakDays?: number
   isOnboarded?: boolean
 }
@@ -45,6 +46,8 @@ export interface TaskItem {
   completedAt?: string
   completionPhotoUrl?: string
   habitSopId?: string
+  active?: boolean
+  createdAt?: string
   subTasks?: SubTaskItem[]
 }
 
@@ -110,6 +113,8 @@ export interface ItemLossRecord {
   lostDate: string
   estimatedCost: number
   frequency: number
+  isHighFrequency?: boolean
+  suggestion?: string
 }
 
 export interface GrowthDataPoint {
@@ -133,19 +138,10 @@ export interface BadgeItem {
   unlocked: boolean
   unlockedAt?: string
   requirement: string
-}
-
-export interface FamilyCovenant {
-  id: string
-  goal: string
-  reward: string
-  childSignature: string
-  parentSignature: string
-  createdAt: string
-  status: 'active' | 'completed' | 'expired'
-  rewardType?: 'experience' | 'material' | 'custom'
-  nudgeMessage?: string
-  completedAt?: string
+  requirementType?: string
+  requirementValue?: number
+  progress?: number
+  rewardPoints?: number
 }
 
 export interface DiagnosticAlert {
@@ -161,7 +157,6 @@ export interface DiagnosticAlert {
 }
 
 export interface ParentSettings {
-  difficultyLevel: number
   dailyReminder: boolean
   achievementNotification: boolean
   weeklyReport: boolean
@@ -173,7 +168,9 @@ export interface HabitSOP {
   id: string
   title: string
   steps: SOPStep[]
-  weekNumber: number
+  rewardPoints: number
+  active?: boolean
+  createdAt?: string
 }
 
 export interface SOPStep {
@@ -181,17 +178,6 @@ export interface SOPStep {
   instruction: string
   imageUrl?: string
   gifUrl?: string
-}
-
-export interface DiscussionPost {
-  id: string
-  title: string
-  content: string
-  author: string
-  tags: string[]
-  replyCount: number
-  hasExpertAnswer: boolean
-  createdAt: string
 }
 
 export interface SunlightRecord {

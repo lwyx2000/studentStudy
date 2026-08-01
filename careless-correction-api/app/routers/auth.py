@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import create_access_token, get_current_user, hash_password, verify_password
 from app.database import get_db
-from app.models import User
+from app.models import Assessment, User
 from app.schemas import ChildOut, TokenOut, UserOut
 
 router = APIRouter()
@@ -65,6 +65,36 @@ def child_login(
 @router.get('/session', response_model=UserOut)
 def get_session(current_user: User = Depends(get_current_user)):
     return UserOut.model_validate(current_user)
+
+
+@router.post('/assessment')
+def save_assessment(
+    focus_attention: int,
+    organization: int,
+    emotional_control: int,
+    planning: int,
+    impulse_control: int,
+    recommended_level: int,
+    task_density: str = 'medium',
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """保存注册评估结果并标记为已完成 onboarding"""
+    assessment = Assessment(
+        fk_users=current_user.pk_users,
+        focus_attention=focus_attention,
+        organization=organization,
+        emotional_control=emotional_control,
+        planning=planning,
+        impulse_control=impulse_control,
+        recommended_level=recommended_level,
+        task_density=task_density,
+        source='initial',
+    )
+    db.add(assessment)
+    current_user.is_onboarded = True
+    db.commit()
+    return {'success': True, 'is_onboarded': True}
 
 
 @router.put('/password')

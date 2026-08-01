@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useUserStore, useBadgeStore, useGrowthStore, useMistakeStore, useParentStore, useTaskStore } from '../../stores'
+import { useUserStore, useBadgeStore, useGrowthStore, useMistakeStore, useTaskStore } from '../../stores'
+import { GRADE_OPTIONS, gradeLabel } from '../../utils/constants'
 import { api, normalizeChild, setAuthToken, normalizeUser, type ChildProfile } from '../../utils/api'
 
 const router = useRouter()
@@ -132,7 +133,7 @@ onMounted(loadChildren)
         <label>
           年级
           <select v-model.number="newGrade" class="input">
-            <option v-for="g in 6" :key="g" :value="g">{{ g }} 年级</option>
+            <option v-for="opt in GRADE_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
           </select>
         </label>
         <button class="btn" :disabled="!newName.trim()" @click="addChild">确认添加</button>
@@ -154,7 +155,7 @@ onMounted(loadChildren)
             <div class="edit-inline">
               <input v-model="editName" class="input" style="width:140px" />
               <select v-model.number="editGrade" class="input" style="width:100px">
-                <option v-for="g in 6" :key="g" :value="g">{{ g }} 年级</option>
+                <option v-for="opt in GRADE_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
               </select>
               <button class="btn" style="padding:6px 14px;font-size:13px" @click="saveEdit(child.id)">保存</button>
               <button class="btn ghost" style="padding:6px 14px;font-size:13px" @click="editingId = null">取消</button>
@@ -168,7 +169,7 @@ onMounted(loadChildren)
               <div>
                 <strong>{{ child.name }}</strong>
                 <span class="muted" style="display:block;font-size:13px">
-                  {{ child.grade }} 年级 · ☀️ {{ child.sunlightPoints }} 阳光值
+                  {{ gradeLabel(child.grade) }} · ☀️ {{ child.sunlightPoints }} 阳光值
                   <span v-if="child.streakDays > 0"> · 🔥 {{ child.streakDays }} 天连续</span>
                 </span>
               </div>

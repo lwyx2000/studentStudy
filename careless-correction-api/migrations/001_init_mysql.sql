@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS t_users (
   name VARCHAR(50) NOT NULL COMMENT '用户名(孩子或家长昵称)',
   role VARCHAR(10) NOT NULL COMMENT '角色: child=孩子, parent=家长',
   password_hash VARCHAR(255) NULL COMMENT '密码哈希(仅家长账号)',
-  grade TINYINT COMMENT '物理年级(仅child, 1-6)',
+  grade TINYINT COMMENT '物理年级(仅child, 0=幼儿园,1-6=小学,7-9=初中,10-12=高中)',
   avatar_url VARCHAR(255) COMMENT '头像URL',
   fk_users_parent INT COMMENT '关联家长(仅child)',
   sunlight_points INT DEFAULT 0 COMMENT '累计阳光值',

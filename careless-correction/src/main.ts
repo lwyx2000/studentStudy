@@ -11,7 +11,7 @@ const app = createApp(App)
 app.use(createPinia())
 app.use(router)
 app.use(Particles, {
-  init: async (engine) => {
+  init: async (engine: Parameters<typeof loadSlim>[0]) => {
     await loadSlim(engine)
   },
 })

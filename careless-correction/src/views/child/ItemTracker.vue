@@ -109,7 +109,9 @@ function addStorage() {
             :key="item.id"
             class="alert"
           >
-            {{ item.itemName }} 30 天内丢失 {{ item.frequency }} 次：建议贴上荧光姓名贴，固定收纳位置。
+            {{ item.itemName }} 30 天内丢失 {{ item.frequency }} 次
+            <span v-if="item.suggestion" style="display:block;margin-top:4px;font-weight:700">💡 {{ item.suggestion }}</span>
+            <span v-else style="display:block;margin-top:4px;font-weight:700">💡 建议贴上荧光姓名贴，固定收纳位置。</span>
           </p>
         </template>
         <p v-else class="lead">暂未触发高频流失预警。</p>
@@ -139,7 +141,7 @@ function addStorage() {
             :key="row.id"
             class="list-row"
           >
-            <span>📦 {{ row.itemName }}｜{{ row.lostLocation }}｜第{{ row.frequency }}次</span>
+            <span>📦 {{ row.itemName }}｜{{ row.lostLocation }}｜第{{ row.frequency }}次 <span v-if="row.isHighFrequency" class="freq-badge">高频⚠️</span></span>
             <span style="font-weight:800">¥{{ row.estimatedCost * row.frequency }}</span>
           </div>
         </div>
@@ -220,5 +222,17 @@ function addStorage() {
 }
 @keyframes pulse {
   50% { box-shadow: 0 0 0 8px rgba(255, 0, 0, .08); }
+}
+.freq-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #ffdad6;
+  color: #93000a;
+  font-size: 11px;
+  font-weight: 800;
+  margin-left: 6px;
+  animation: pulse 1.5s infinite;
 }
 </style>
