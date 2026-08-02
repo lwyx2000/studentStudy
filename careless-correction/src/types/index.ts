@@ -180,6 +180,20 @@ export interface SOPStep {
   gifUrl?: string
 }
 
+export interface HabitAssignment {
+  id: string
+  childId: string
+  parentId: string
+  title: string
+  description: string
+  icon: string
+  rewardPoints: number
+  weekNumber: number
+  steps: SOPStep[]
+  assignedAt: string
+  active: boolean
+}
+
 export interface SunlightRecord {
   id: string
   amount: number

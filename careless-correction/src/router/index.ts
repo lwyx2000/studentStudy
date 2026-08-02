@@ -72,6 +72,12 @@ const routes = [
     meta: { parentOnly: true },
   },
   {
+    path: '/parent/habit-assign',
+    name: 'HabitAssign',
+    component: () => import('../views/parent/HabitAssignPage.vue'),
+    meta: { parentOnly: true },
+  },
+  {
     path: '/tree',
     name: 'SunshineTree',
     component: () => import('../views/child/SunshineTree.vue'),

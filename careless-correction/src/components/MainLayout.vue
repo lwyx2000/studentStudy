@@ -77,6 +77,7 @@ const parentNavItems = [
   { name: 'ChildManagement', path: '/parent/children', icon: '👦', label: '孩子管理' },
   { name: 'ProgressDashboard', path: '/parent/progress', icon: '📊', label: '进度查看' },
   { name: 'TaskHabitManager', path: '/parent/tasks', icon: '📋', label: '任务与习惯' },
+  { name: 'HabitAssign', path: '/parent/habit-assign', icon: '🧩', label: '习惯布置' },
   { name: 'TaskHabitInventory', path: '/parent/inventory', icon: '📦', label: '任务清单' },
   { name: 'ItemStats', path: '/parent/items', icon: '🎒', label: '物品统计' },
   { name: 'SunlightManagement', path: '/parent/sunlight', icon: '☀️', label: '阳光值' },

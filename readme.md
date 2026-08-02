@@ -41,6 +41,7 @@
 | /parent | 家长控制中心 | 家长端总览仪表盘 |
 | /parent/children | 孩子管理 | 添加/编辑/删除孩子账号 |
 | /parent/tasks | 任务习惯管理 | 创建/编辑任务和习惯，含子任务管理 |
+| /parent/habit-assign | 习惯布置 | 为孩子布置每周核心习惯（SOP 步骤 + 奖励） |
 | /parent/progress | 进度看板 | 孩子多维进度数据可视化 |
 | /parent/items | 物品统计 | 物品丢失数据统计 |
 | /parent/sunlight | 阳光值管理 | 阳光值发放与兑换管理 |
