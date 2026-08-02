@@ -77,6 +77,11 @@ const routes = [
     component: () => import('../views/child/SunshineTree.vue'),
   },
   {
+    path: '/guide',
+    name: 'UsageGuide',
+    component: () => import('../views/child/UsageGuide.vue'),
+  },
+  {
     path: '/parent/tasks',
     name: 'TaskHabitManager',
     component: () => import('../views/parent/TaskHabitManager.vue'),

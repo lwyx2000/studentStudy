@@ -115,6 +115,7 @@ function logout() {
         <span v-if="!isParent || isViewingAsChild" class="pill">☀️ {{ userStore.sunlightPoints || 0 }} 阳光值 · 🍎 {{ userStore.apples || 0 }} 苹果</span>
         <span v-if="!isParent" class="pill">Lv{{ userStore.assessment.recommendedLevel }} · {{ gradeLabel(userStore.profile.grade || 3) }}</span>
         <button v-if="isViewingAsChild" class="role-btn back-btn" @click="backToParent">↩ 返回家长端</button>
+        <button class="role-btn guide-btn" @click="router.push('/guide')">❓ 使用说明</button>
         <button v-if="!isViewingAsChild" class="role-btn pwd-btn" @click="openPasswordModal">🔑 修改密码</button>
         <button v-if="!isViewingAsChild" class="role-btn logout-btn" @click="logout">退出登录</button>
       </div>
@@ -189,6 +190,7 @@ function logout() {
 .child-badge { background: #ecffd9; border-color: var(--primary); color: var(--primary); }
 .role-btn { color: #fff; background: var(--primary); border-color: var(--primary); cursor: pointer; }
 .back-btn { background: #e8b84b; border-color: #e8b84b; }
+.guide-btn { background: #8a5a2b; border-color: #8a5a2b; }
 .pwd-btn { background: #6b8eb8; border-color: #6b8eb8; }
 .logout-btn { background: #888; border-color: #888; }
 .sidebar { padding: 20px 14px; border-right: 1px solid var(--line); background: rgba(246,244,233,.8); }
