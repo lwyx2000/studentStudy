@@ -249,6 +249,20 @@ npm run dev
 
 ---
 
+## Docker 部署
+
+支持 Jenkins 流水线自动部署或手动脚本部署，前后端通过 Docker 容器化发布到服务器（Nginx 反向代理 + FastAPI + Vue 构建产物 volume）。
+
+```bash
+# 方式一：Jenkins（推荐）—— 使用仓库根目录 Jenkinsfile 创建流水线任务
+# 方式二：手动脚本
+bash deploy.sh
+```
+
+详细说明（服务器准备、Jenkins 配置、参数含义、数据备份、FAQ）见 [docs/deploy.md](docs/deploy.md)。
+
+---
+
 ## 设计特点
 
 ### 游戏化激励体系
