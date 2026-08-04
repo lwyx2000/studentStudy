@@ -4,8 +4,6 @@ import uuid
 from datetime import date, datetime
 from pathlib import Path
 
-import cv2
-import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session, selectinload
 
@@ -14,8 +12,6 @@ from app.database import get_db
 from app.models import SubTask, Task, User
 from app.schemas import SubTaskOut, TaskOut
 
-# ── In-memory scan batch store ──
-scan_batches: dict[str, dict] = {}
 
 router = APIRouter()
 
@@ -146,128 +142,6 @@ def complete_task(
     db.commit()
     db.refresh(task)
     return {'task': TaskOut.model_validate(task), 'pointsEarned': task.reward_points}
-
-
-@router.post('/checkin')
-async def checkin(
-    photo: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-):
-    upload_dir = Path('./uploads')
-    upload_dir.mkdir(exist_ok=True)
-    file_path = upload_dir / f'task_{current_user.pk_users}_{datetime.now().timestamp()}_{photo.filename}'
-    content = await photo.read()
-    file_path.write_bytes(content)
-    photo_url = f'/uploads/{file_path.name}'
-    return {'photoUrl': photo_url, 'recognized': True}
-
-
-def _detect_checked_boxes(image_path: str) -> list[dict]:
-    """Use OpenCV to detect filled checkboxes in a scanned checklist photo.
-    
-    Returns list of detected box regions with checked status.
-    """
-    img = cv2.imread(image_path)
-    if img is None:
-        return []
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    h, w = gray.shape
-
-    # Lighting normalization
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    gray = clahe.apply(gray)
-
-    # Adaptive threshold to binary
-    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                   cv2.THRESH_BINARY_INV, 15, 3)
-
-    # Remove long lines (table borders) to isolate checkboxes
-    horizontal = cv2.morphologyEx(thresh, cv2.MORPH_OPEN,
-                                   cv2.getStructuringElement(cv2.MORPH_RECT, (max(w // 30, 3), 1)))
-    vertical = cv2.morphologyEx(thresh, cv2.MORPH_OPEN,
-                                 cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(h // 30, 3))))
-    lines = cv2.bitwise_or(horizontal, vertical)
-    clean = cv2.bitwise_xor(thresh, lines)
-
-    # Find contours
-    contours, _ = cv2.findContours(clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    min_box = max(w * 0.008, 8)
-    max_box = max(w * 0.06, 60)
-    results = []
-
-    for cnt in contours:
-        x, y, bw, bh = cv2.boundingRect(cnt)
-        if bw < min_box or bh < min_box or bw > max_box or bh > max_box:
-            continue
-        aspect = bw / max(bh, 1)
-        if aspect < 0.4 or aspect > 2.5:
-            continue
-
-        # Calculate fill ratio inside bounding rect
-        roi = thresh[y:y + bh, x:x + bw]
-        fill = cv2.countNonZero(roi) / (bw * bh)
-
-        results.append({
-            'x': int(x), 'y': int(y), 'w': int(bw), 'h': int(bh),
-            'fill': round(fill, 3),
-            'checked': fill > 0.25,
-        })
-
-    return results
-
-
-@router.post('/scan')
-async def scan_checklist(
-    photo: UploadFile = File(...),
-    child_id: int | None = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Upload a photo of the printed checklist; detect checked boxes via OpenCV."""
-    upload_dir = Path('./uploads')
-    upload_dir.mkdir(exist_ok=True)
-    file_path = upload_dir / f'scan_{current_user.pk_users}_{datetime.now().timestamp()}_{photo.filename}'
-    content = await photo.read()
-    file_path.write_bytes(content)
-    photo_url = f'/uploads/{file_path.name}'
-
-    boxes = _detect_checked_boxes(str(file_path))
-    checked_count = sum(1 for b in boxes if b['checked'])
-
-    target = resolve_target_user(current_user, child_id, db)
-    today_tasks = (
-        db.query(Task)
-        .filter(
-            Task.fk_users == target.pk_users,
-            Task.assigned_date == date.today(),
-            Task.active == True,
-        )
-        .order_by(Task.type)
-        .all()
-    )
-
-    # If we detected exactly the right number of boxes, mark tasks in order
-    completed_ids: list[int] = []
-    if checked_count > 0 and len(today_tasks) > 0:
-        checked_ids = [t.pk_tasks for t in today_tasks[:checked_count]
-                       if t.status == 'pending']
-        for task_id in checked_ids:
-            task = db.query(Task).filter(Task.pk_tasks == task_id).first()
-            if task and task.status == 'pending':
-                task.status = 'completed'
-                task.completed_at = datetime.now()
-                # 阳光值不再在此处自动发放，统一由家长审批打卡 (checkins/approve) 后发放
-                task.completion_photo_url = photo_url
-                completed_ids.append(task_id)
-        db.commit()
-
-    return {
-        'photoUrl': photo_url,
-        'checkedCount': checked_count,
-        'detectedBoxes': len(boxes),
-        'tasksCompleted': completed_ids,
-    }
 
 
 @router.get('/checkin/history')
@@ -520,87 +394,3 @@ def delete_subtask(
     db.commit()
     return {'success': True}
 
-
-async def _process_scan_batch(batch_id: str):
-    """Background worker that processes each file in the batch."""
-    batch = scan_batches.get(batch_id)
-    if not batch:
-        return
-    upload_dir = Path('./uploads')
-    upload_dir.mkdir(exist_ok=True)
-    photo_urls: list[str] = []
-    for i, file_bytes in enumerate(batch['pending_files']):
-        filename = batch['filenames'][i]
-        file_path = upload_dir / f'scan_{batch_id}_{i}_{filename}'
-        file_path.write_bytes(file_bytes)
-        photo_url = f'/uploads/{file_path.name}'
-        photo_urls.append(photo_url)
-
-        try:
-            boxes = _detect_checked_boxes(str(file_path))
-            checked_count = sum(1 for b in boxes if b['checked'])
-            batch['results'].append({
-                'filename': filename,
-                'photoUrl': photo_url,
-                'checkedCount': checked_count,
-                'detectedBoxes': len(boxes),
-            })
-            batch['completed'] += 1
-        except Exception:
-            batch['failed'] += 1
-            batch['errors'].append(filename)
-        batch['progress'] = batch['completed'] + batch['failed']
-        await asyncio.sleep(0.05)  # yield control
-    # Mark done and update task completion counts
-    batch['done'] = True
-    batch.pop('pending_files', None)
-    batch.pop('filenames', None)
-
-
-@router.post('/scan/batch')
-async def scan_batch(
-    photos: list[UploadFile] = File(...),
-    child_id: int | None = None,
-    current_user: User = Depends(get_current_user),
-):
-    """Upload multiple checklist photos; process asynchronously.
-    Returns a batch_id to poll for status.
-    """
-    batch_id = uuid.uuid4().hex[:12]
-    pending_files: list[bytes] = []
-    filenames: list[str] = []
-    for photo in photos:
-        content = await photo.read()
-        pending_files.append(content)
-        filenames.append(photo.filename or 'photo.jpg')
-
-    scan_batches[batch_id] = {
-        'total': len(pending_files),
-        'progress': 0,
-        'completed': 0,
-        'failed': 0,
-        'done': False,
-        'results': [],
-        'errors': [],
-        'pending_files': pending_files,
-        'filenames': filenames,
-    }
-    asyncio.create_task(_process_scan_batch(batch_id))
-    return {'batchId': batch_id, 'total': len(pending_files)}
-
-
-@router.get('/scan/batch/{batch_id}')
-def get_scan_batch_status(batch_id: str):
-    """Poll scan batch progress."""
-    batch = scan_batches.get(batch_id)
-    if not batch:
-        raise HTTPException(status_code=404, detail='批次不存在')
-    return {
-        'total': batch['total'],
-        'progress': batch['progress'],
-        'completed': batch['completed'],
-        'failed': batch['failed'],
-        'done': batch['done'],
-        'results': batch['results'],
-        'errors': batch['errors'],
-    }
