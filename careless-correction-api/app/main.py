@@ -56,6 +56,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title='小树成长岛 API', version='1.0.0', lifespan=lifespan)
 
+
+@app.get('/health')
+async def health():
+    """健康检查端点（供 Docker HEALTHCHECK / nginx 探活使用）"""
+    return {'status': 'ok', 'service': 'studentstudy-api'}
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=['*'],
