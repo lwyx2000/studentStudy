@@ -45,6 +45,9 @@ const expandedTaskId = ref<string | null>(null)
 // ── Check-in Approval ──
 const pendingCheckins = ref<any[]>([])
 const loadingCheckins = ref(false)
+const expandedCheckinId = ref<number | null>(null)
+const checkinDetails = ref<any>(null)
+const loadingDetails = ref(false)
 
 async function loadPendingCheckins() {
   loadingCheckins.value = true
@@ -55,10 +58,30 @@ async function loadPendingCheckins() {
   loadingCheckins.value = false
 }
 
+async function toggleCheckinDetail(ci: any) {
+  if (expandedCheckinId.value === ci.id) {
+    expandedCheckinId.value = null
+    checkinDetails.value = null
+    return
+  }
+  expandedCheckinId.value = ci.id
+  checkinDetails.value = null
+  loadingDetails.value = true
+  try {
+    const res = await api.checkins.getDetails(ci.id)
+    checkinDetails.value = res
+  } catch { /* offline */ }
+  loadingDetails.value = false
+}
+
 async function approveCheckin(id: number) {
   try {
     await api.checkins.approve(id)
     pendingCheckins.value = pendingCheckins.value.filter(c => c.id !== id)
+    if (expandedCheckinId.value === id) {
+      expandedCheckinId.value = null
+      checkinDetails.value = null
+    }
     // Check for badge auto-unlocks after approval
     await badgeStore.checkAndUnlock(childSelectStore.selectedChildId ?? undefined)
   } catch { /* offline */ }
@@ -68,6 +91,10 @@ async function rejectCheckin(id: number) {
   try {
     await api.checkins.reject(id)
     pendingCheckins.value = pendingCheckins.value.filter(c => c.id !== id)
+    if (expandedCheckinId.value === id) {
+      expandedCheckinId.value = null
+      checkinDetails.value = null
+    }
   } catch { /* offline */ }
 }
 
@@ -121,23 +148,133 @@ function toggle(key: 'dailyReminder' | 'achievementNotification' | 'weeklyReport
         <h2>⏳ 待审批打卡</h2>
         <span class="tag" style="background:#ff9800;color:#fff">{{ pendingCheckins.length }} 条待审批</span>
       </div>
+      <p class="lead" style="font-size:13px;margin-bottom:12px;color:#8a6d3b">
+        💡 点击审批单可展开查看孩子提交的任务和习惯详情。
+      </p>
       <div class="list">
-        <div v-for="ci in pendingCheckins" :key="ci.id" class="list-row checkin-row">
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <strong>{{ ci.childName }}</strong>
-              <span class="mini-tag">📅 {{ ci.checkDate }}</span>
-              <span class="mini-tag">☀️ +{{ ci.totalPoints }}</span>
-              <span v-if="ci.taskCount" class="mini-tag">✅ {{ ci.taskCount }} 项</span>
+        <div v-for="ci in pendingCheckins" :key="ci.id" class="checkin-item-wrap">
+          <!-- 审批单头部（可点击展开） -->
+          <div
+            class="list-row checkin-row"
+            :class="{ 'checkin-expanded': expandedCheckinId === ci.id }"
+            style="cursor:pointer"
+            @click="toggleCheckinDetail(ci)"
+          >
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span class="expand-arrow" :class="{ expanded: expandedCheckinId === ci.id }">▶</span>
+                <strong>{{ ci.childName }}</strong>
+                <span class="mini-tag">📅 {{ ci.checkDate }}</span>
+                <span class="mini-tag" style="background:#fff3cd;color:#856404">☀️ +{{ ci.totalPoints }}</span>
+                <span v-if="ci.taskCount" class="mini-tag" style="background:#d4edda;color:#155724">✅ {{ ci.taskCount }} 项任务</span>
+                <span v-if="ci.habitStepCount" class="mini-tag" style="background:#cce5ff;color:#004085">🌱 {{ ci.habitStepCount }} 步习惯</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-shrink:0" @click.stop>
+              <button class="btn secondary" style="padding:8px 16px;font-size:13px" @click="approveCheckin(ci.id)">
+                ✅ 批准
+              </button>
+              <button class="btn ghost" style="padding:8px 16px;font-size:13px;color:#c00" @click="rejectCheckin(ci.id)">
+                ❌ 驳回
+              </button>
             </div>
           </div>
-          <div style="display:flex;gap:8px;flex-shrink:0">
-            <button class="btn secondary" style="padding:8px 16px;font-size:13px" @click="approveCheckin(ci.id)">
-              ✅ 批准
-            </button>
-            <button class="btn ghost" style="padding:8px 16px;font-size:13px;color:#c00" @click="rejectCheckin(ci.id)">
-              ❌ 驳回
-            </button>
+
+          <!-- 展开详情 -->
+          <div v-if="expandedCheckinId === ci.id" class="checkin-detail">
+            <div v-if="loadingDetails" style="text-align:center;padding:24px">
+              <p class="muted">⏳ 加载孩子提交详情...</p>
+            </div>
+            <template v-else-if="checkinDetails">
+              <!-- 提交摘要 -->
+              <div class="detail-summary">
+                <div class="summary-item">
+                  <strong>{{ checkinDetails.checkin.childName }}</strong>
+                  <span class="muted">提交于 {{ checkinDetails.checkin.checkDate }}</span>
+                </div>
+                <div class="summary-stats">
+                  <div class="summary-stat">
+                    <span class="summary-num">{{ checkinDetails.checkin.taskCount }}</span>
+                    <span class="muted">完成任务</span>
+                  </div>
+                  <div class="summary-stat">
+                    <span class="summary-num">{{ checkinDetails.checkin.habitStepCount }}</span>
+                    <span class="muted">习惯步骤</span>
+                  </div>
+                  <div class="summary-stat">
+                    <span class="summary-num">+{{ checkinDetails.checkin.totalPoints }}</span>
+                    <span class="muted">阳光值</span>
+                  </div>
+                  <div v-if="checkinDetails.checkin.streakDays" class="summary-stat">
+                    <span class="summary-num">🔥 {{ checkinDetails.checkin.streakDays }}</span>
+                    <span class="muted">连续天数</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 已完成任务 -->
+              <div v-if="checkinDetails.completedTasks.length" class="detail-section">
+                <h4>✅ 已完成的任务</h4>
+                <div class="detail-list">
+                  <div v-for="task in checkinDetails.completedTasks" :key="task.pk_tasks" class="detail-task-row">
+                    <span style="font-size:20px;flex-shrink:0">{{ task.icon || '📋' }}</span>
+                    <div style="flex:1;min-width:0">
+                      <strong>{{ task.title }}</strong>
+                      <span class="muted" style="display:block;font-size:12px">{{ task.description || '无描述' }}</span>
+                    </div>
+                    <span class="mini-tag" style="background:#d4edda;color:#155724">✓ 完成</span>
+                    <span class="mini-tag">☀️ +{{ task.reward_points }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 待完成任务 -->
+              <div v-if="checkinDetails.pendingTasks.length" class="detail-section">
+                <h4>⏳ 未完成的任务（{{ checkinDetails.pendingTasks.length }} 项）</h4>
+                <div class="detail-list">
+                  <div v-for="task in checkinDetails.pendingTasks.slice(0, 5)" :key="task.pk_tasks" class="detail-task-row" style="opacity:.6">
+                    <span style="font-size:20px;flex-shrink:0">{{ task.icon || '📋' }}</span>
+                    <div style="flex:1;min-width:0">
+                      <strong>{{ task.title }}</strong>
+                      <span class="muted" style="display:block;font-size:12px">{{ task.description || '无描述' }}</span>
+                    </div>
+                    <span class="mini-tag" style="background:#f8d7da;color:#721c24">○ 未完成</span>
+                  </div>
+                  <p v-if="checkinDetails.pendingTasks.length > 5" class="muted" style="font-size:12px;text-align:center;padding:4px">
+                    还有 {{ checkinDetails.pendingTasks.length - 5 }} 项未展示...
+                  </p>
+                </div>
+              </div>
+
+              <!-- 习惯列表 -->
+              <div v-if="checkinDetails.habits.length" class="detail-section">
+                <h4>🌱 习惯打卡情况</h4>
+                <div class="detail-list">
+                  <div v-for="habit in checkinDetails.habits" :key="habit.pk_habit_sops" class="detail-habit-row">
+                    <div style="flex:1;min-width:0">
+                      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <strong>{{ habit.title }}</strong>
+                        <span class="mini-tag">☀️ +{{ habit.reward_points }}/步</span>
+                        <span class="mini-tag" style="background:#cce5ff;color:#004085">{{ habit.steps.length }} 步</span>
+                      </div>
+                      <div v-if="habit.steps.length" class="habit-steps-mini">
+                        <div v-for="step in habit.steps" :key="step.order" class="step-mini">
+                          <b class="step-mini-num">{{ step.order }}</b>
+                          <span>{{ step.instruction }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p v-if="!checkinDetails.completedTasks.length && !checkinDetails.pendingTasks.length && !checkinDetails.habits.length" class="muted" style="text-align:center;padding:16px">
+                暂无任务和习惯数据
+              </p>
+            </template>
+            <div v-else style="text-align:center;padding:16px">
+              <p class="muted">加载失败，请重试</p>
+            </div>
           </div>
         </div>
       </div>
@@ -358,6 +495,134 @@ function toggle(key: 'dailyReminder' | 'achievementNotification' | 'weeklyReport
 .checkin-row {
   flex-wrap: wrap;
   gap: 8px;
+}
+.checkin-item-wrap {
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #fff;
+  transition: border-color .15s ease;
+}
+.checkin-item-wrap + .checkin-item-wrap {
+  margin-top: 8px;
+}
+.checkin-item-wrap .checkin-row {
+  border: none;
+  border-radius: 0;
+}
+.checkin-expanded {
+  border-color: #ff9800 !important;
+  background: #fffbf0;
+}
+.expand-arrow {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--muted);
+  transition: transform .2s ease;
+  flex-shrink: 0;
+}
+.expand-arrow.expanded {
+  transform: rotate(90deg);
+  color: #ff9800;
+}
+.checkin-detail {
+  padding: 16px 18px;
+  background: #fafafa;
+  border-top: 1px dashed #e0e0e0;
+  animation: fadeIn .2s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.detail-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.summary-item strong {
+  font-size: 16px;
+}
+.summary-stats {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.summary-num {
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--primary);
+}
+.detail-section {
+  margin-top: 14px;
+}
+.detail-section h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--ink);
+}
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.detail-task-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.detail-habit-row {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.habit-steps-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-left: 4px;
+}
+.step-mini {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: #555;
+}
+.step-mini-num {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--primary-2);
+  color: #fff;
+  font-size: 11px;
+  flex-shrink: 0;
 }
 .article-list {
   display: flex;

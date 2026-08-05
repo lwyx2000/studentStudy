@@ -501,6 +501,8 @@ export const api = {
       request<{ success: boolean; awarded: number }>(`/checkins/${id}/approve`, { method: 'POST' }),
     reject: (id: number) =>
       request<{ success: boolean }>(`/checkins/${id}/reject`, { method: 'POST' }),
+    getDetails: (id: number) =>
+      request<{ checkin: any; completedTasks: any[]; pendingTasks: any[]; habits: any[] }>(`/checkins/${id}/details`),
   },
 
   badges: {

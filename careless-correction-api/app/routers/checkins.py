@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import CheckIn, SunlightHistory, User
+from app.models import CheckIn, HabitSOP, SOPStep, SunlightHistory, Task, User
 from app.routers.badges import auto_unlock_badges
+from app.schemas import TaskOut
 
 
 def _parse_check_date(check_date: str):
@@ -173,3 +174,91 @@ def reject_checkin(
     record.status = 'rejected'
     db.commit()
     return {'success': True, 'childName': child.name}
+
+
+@router.get('/{checkin_id}/details')
+def get_checkin_details(
+    checkin_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取打卡详情，包括孩子的任务完成情况和习惯数据"""
+    record = db.query(CheckIn).filter(CheckIn.pk_check_ins == checkin_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail='打卡记录不存在')
+    child = db.query(User).filter(User.pk_users == record.fk_users).first()
+    if not child or child.fk_users_parent != current_user.pk_users:
+        raise HTTPException(status_code=403, detail='无权查看该打卡')
+
+    # 获取孩子的所有任务（含子任务）
+    tasks = (
+        db.query(Task)
+        .options(selectinload(Task.sub_tasks))
+        .filter(Task.fk_users == child.pk_users, Task.active == True)
+        .order_by(Task.type)
+        .all()
+    )
+
+    # 获取孩子的所有活跃习惯（含步骤）
+    habits = (
+        db.query(HabitSOP)
+        .options(selectinload(HabitSOP.steps))
+        .filter(HabitSOP.fk_users == child.pk_users, HabitSOP.active == True)
+        .order_by(HabitSOP.created_at.desc())
+        .all()
+    )
+
+    # 解析打卡日期
+    check_date = _parse_check_date(record.check_date)
+
+    # 统计已完成任务
+    completed_tasks = []
+    pending_tasks = []
+    for t in tasks:
+        task_dict = TaskOut.model_validate(t).model_dump(mode='json')
+        if t.status == 'completed':
+            # 如果有完成时间且与打卡日期匹配，优先显示
+            if t.completed_at and check_date:
+                if t.completed_at.date() == check_date:
+                    completed_tasks.append(task_dict)
+                else:
+                    pending_tasks.append(task_dict)
+            else:
+                completed_tasks.append(task_dict)
+        else:
+            pending_tasks.append(task_dict)
+
+    habit_list = []
+    for h in habits:
+        habit_dict = {
+            'pk_habit_sops': h.pk_habit_sops,
+            'title': h.title,
+            'reward_points': h.reward_points,
+            'steps': [
+                {
+                    'order': s.order,
+                    'instruction': s.instruction,
+                    'image_url': s.image_url,
+                    'gif_url': s.gif_url,
+                }
+                for s in h.steps
+            ],
+        }
+        habit_list.append(habit_dict)
+
+    return {
+        'checkin': {
+            'id': record.pk_check_ins,
+            'childName': child.name,
+            'checkDate': record.check_date,
+            'totalPoints': record.total_points,
+            'habitStepCount': record.habit_step_count,
+            'taskCount': record.task_count,
+            'status': record.status,
+            'createdAt': record.created_at.isoformat() if record.created_at else None,
+            'streakDays': child.streak_days,
+        },
+        'completedTasks': completed_tasks,
+        'pendingTasks': pending_tasks,
+        'habits': habit_list,
+    }

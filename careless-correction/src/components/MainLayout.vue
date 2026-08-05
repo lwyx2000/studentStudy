@@ -15,6 +15,13 @@ const isViewingAsChild = computed(() => {
   return userStore.profile.role === 'child' && !!localStorage.getItem('cc-parent-token')
 })
 
+// 侧边栏收缩/展开状态
+const sidebarCollapsed = ref(localStorage.getItem('cc-sidebar-collapsed') === 'true')
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem('cc-sidebar-collapsed', String(sidebarCollapsed.value))
+}
+
 // 页面切换时刷新阳光/苹果余额：顶部 pill 与各页面共享同一 store，刷新一次即全局生效
 // （家长端自身顶部不显示阳光值，且切换孩子由 App.vue 统一加载，故仅孩子视角需要）
 watch(
@@ -77,8 +84,7 @@ const parentNavItems = [
   { name: 'ChildManagement', path: '/parent/children', icon: '👦', label: '孩子管理' },
   { name: 'ProgressDashboard', path: '/parent/progress', icon: '📊', label: '进度查看' },
   { name: 'TaskHabitManager', path: '/parent/tasks', icon: '📋', label: '任务与习惯' },
-  { name: 'HabitAssign', path: '/parent/habit-assign', icon: '🧩', label: '习惯布置' },
-  { name: 'TaskHabitInventory', path: '/parent/inventory', icon: '📦', label: '任务清单' },
+  { name: 'TaskHabitInventory', path: '/parent/inventory', icon: '📦', label: '复用库' },
   { name: 'ItemStats', path: '/parent/items', icon: '🎒', label: '物品统计' },
   { name: 'SunlightManagement', path: '/parent/sunlight', icon: '☀️', label: '阳光值' },
   { name: 'ParentBadges', path: '/parent/badges', icon: '🏅', label: '勋章管理' },
@@ -103,12 +109,18 @@ function logout() {
 </script>
 
 <template>
-  <div class="shell">
+  <div class="shell" :class="{ collapsed: sidebarCollapsed }">
     <header class="topbar">
-      <button class="brand" @click="router.push(isParent ? '/parent' : '/dashboard')">
-        <span class="brand-mark">🌿</span>
-        <span>小树成长岛</span>
-      </button>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="sidebar-toggle" @click="toggleSidebar" :title="sidebarCollapsed ? '展开菜单' : '收起菜单'">
+          <span v-if="sidebarCollapsed">☰</span>
+          <span v-else>✕</span>
+        </button>
+        <button class="brand" @click="router.push(isParent ? '/parent' : '/dashboard')">
+          <span class="brand-mark">🌿</span>
+          <span v-if="!sidebarCollapsed">小树成长岛</span>
+        </button>
+      </div>
       <div class="top-actions">
         <span v-if="isViewingAsChild" class="pill child-badge">
           👦 {{ userStore.profile.name }} 的视角
@@ -122,22 +134,23 @@ function logout() {
       </div>
     </header>
 
-    <aside class="sidebar">
-      <div class="tree-card clickable-card" @click="router.push(isParent ? '/parent' : '/dashboard')">
+    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+      <div v-if="!sidebarCollapsed" class="tree-card clickable-card" @click="router.push(isParent ? '/parent' : '/dashboard')">
         <div class="tree-visual">{{ isParent ? '🌳' : '🌱' }}</div>
         <strong>{{ userStore.profile.name || '我的' }}{{ isParent ? ' 的管理台' : ' 的成长树' }}</strong>
         <span>{{ isParent ? '管理孩子的成长旅程' : '今天只聚焦 1 个核心习惯' }}</span>
       </div>
-      <nav class="nav-list">
+      <nav class="nav-list" :class="{ 'nav-collapsed': sidebarCollapsed }">
         <router-link
           v-for="item in navItems"
           :key="item.name"
           :to="item.path"
           class="nav-item"
           :class="{ active: route.name === item.name }"
+          :title="sidebarCollapsed ? item.label : ''"
         >
-          <span>{{ item.icon }}</span>
-          <span>{{ item.label }}</span>
+          <span class="nav-icon">{{ item.icon }}</span>
+          <span v-if="!sidebarCollapsed" class="nav-label">{{ item.label }}</span>
         </router-link>
       </nav>
     </aside>
@@ -182,10 +195,13 @@ function logout() {
 </template>
 
 <style scoped>
-.shell { min-height: 100vh; display: grid; grid-template-columns: 260px 1fr; grid-template-rows: 76px 1fr; background: var(--bg); }
+.shell { min-height: 100vh; display: grid; grid-template-columns: 260px 1fr; grid-template-rows: 76px 1fr; background: var(--bg); transition: grid-template-columns .25s ease; }
+.shell.collapsed { grid-template-columns: 64px 1fr; }
 .topbar { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; padding: 0 28px; position: sticky; top: 0; z-index: 10; background: rgba(252,250,239,.9); backdrop-filter: blur(16px); border-bottom: 1px solid var(--line); }
+.sidebar-toggle { width: 38px; height: 38px; border-radius: 12px; border: 1px solid var(--line); background: #fff; font-size: 18px; cursor: pointer; display: grid; place-items: center; color: var(--ink); transition: all .15s ease; flex-shrink: 0; }
+.sidebar-toggle:hover { background: var(--surface); border-color: var(--primary); color: var(--primary); }
 .brand { display: inline-flex; align-items: center; gap: 12px; color: var(--primary); background: transparent; font-size: 22px; font-weight: 950; letter-spacing: -.03em; }
-.brand-mark { width: 44px; height: 44px; border-radius: 16px; display: grid; place-items: center; background: var(--yellow); }
+.brand-mark { width: 44px; height: 44px; border-radius: 16px; display: grid; place-items: center; background: var(--yellow); flex-shrink: 0; }
 .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .pill, .role-btn { display: inline-flex; align-items: center; border-radius: 999px; padding: 9px 13px; background: #fff; border: 1px solid var(--line); font-weight: 800; }
 .child-badge { background: #ecffd9; border-color: var(--primary); color: var(--primary); }
@@ -194,14 +210,19 @@ function logout() {
 .guide-btn { background: #8a5a2b; border-color: #8a5a2b; }
 .pwd-btn { background: #6b8eb8; border-color: #6b8eb8; }
 .logout-btn { background: #888; border-color: #888; }
-.sidebar { padding: 20px 14px; border-right: 1px solid var(--line); background: rgba(246,244,233,.8); }
+.sidebar { padding: 20px 14px; border-right: 1px solid var(--line); background: rgba(246,244,233,.8); transition: padding .25s ease; overflow: hidden; }
+.sidebar.collapsed { padding: 20px 8px; }
 .tree-card { padding: 18px; border-radius: 26px; background: #fff; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(75,63,54,.08); display: flex; flex-direction: column; gap: 8px; }
 .tree-visual { height: 86px; display: grid; place-items: center; border-radius: 22px; background: linear-gradient(180deg, #c9f2ff, #f6ffd7); font-size: 48px; }
 .tree-card span { color: var(--muted); font-size: 13px; }
 .clickable-card { cursor: pointer; transition: background .12s ease; }
 .clickable-card:hover { background: #f7fcef; }
 .nav-list { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
-.nav-item { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 18px; color: var(--muted); text-decoration: none; font-weight: 850; }
+.nav-list.nav-collapsed { margin-top: 18px; gap: 6px; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 18px; color: var(--muted); text-decoration: none; font-weight: 850; transition: all .15s ease; }
+.nav-list.nav-collapsed .nav-item { justify-content: center; padding: 13px 0; }
+.nav-icon { font-size: 20px; flex-shrink: 0; }
+.nav-label { white-space: nowrap; overflow: hidden; }
 .nav-item:hover { background: rgba(255,255,255,.8); color: var(--ink); }
 .nav-item.active { color: #fff; background: var(--primary); box-shadow: 0 10px 24px rgba(16,110,0,.22); }
 .content { padding: 28px; overflow: auto; }
@@ -271,5 +292,5 @@ function logout() {
   font-size: 14px;
 }
 
-@media (max-width: 860px) { .shell { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; } .topbar { position: static; align-items: flex-start; gap: 12px; flex-direction: column; padding: 16px; } .sidebar { border-right: 0; border-bottom: 1px solid var(--line); } .tree-card { display: none; } .nav-list { margin: 0; flex-direction: row; overflow-x: auto; } .nav-item { white-space: nowrap; } .content { padding: 18px; } }
+@media (max-width: 860px) { .shell, .shell.collapsed { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; } .topbar { position: static; align-items: flex-start; gap: 12px; flex-direction: column; padding: 16px; } .sidebar, .sidebar.collapsed { border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 14px; } .tree-card { display: none; } .nav-list, .nav-list.nav-collapsed { margin: 0; flex-direction: row; overflow-x: auto; gap: 8px; } .nav-item { white-space: nowrap; } .nav-list.nav-collapsed .nav-item { padding: 13px 14px; } .content { padding: 18px; } }
 </style>

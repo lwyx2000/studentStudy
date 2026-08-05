@@ -22,13 +22,14 @@ import ChildSelector from '../../components/ChildSelector.vue'
 
 const childSelectStore = useChildSelectStore()
 
-const activeTab = ref<'subtasks' | 'steps'>('subtasks')
+const activeTab = ref<'subtasks' | 'habits'>('subtasks')
 const subTaskLibrary = ref<any[]>([])
-const stepLibrary = ref<any[]>([])
+const habitLibrary = ref<any[]>([])
 const loading = ref(false)
 
 const totalSubTasks = computed(() => subTaskLibrary.value.length)
-const totalSteps = computed(() => stepLibrary.value.length)
+const totalHabits = computed(() => habitLibrary.value.length)
+const totalHabitSteps = computed(() => habitLibrary.value.reduce((s: number, h: any) => s + (h.steps?.length ?? 0), 0))
 
 async function loadLibraries() {
   loading.value = true
@@ -38,8 +39,8 @@ async function loadLibraries() {
     subTaskLibrary.value = res.subtasks ?? []
   } catch { /* offline */ }
   try {
-    const res = await api.habits.getStepLibrary(childId)
-    stepLibrary.value = res.steps ?? []
+    const res = await api.habits.getInventory(childId)
+    habitLibrary.value = res.habits ?? []
   } catch { /* offline */ }
   loading.value = false
 }
@@ -73,7 +74,11 @@ onMounted(loadLibraries)
             <span>子任务</span>
           </div>
           <div class="mini-stat">
-            <strong>{{ totalSteps }}</strong>
+            <strong>{{ totalHabits }}</strong>
+            <span>习惯</span>
+          </div>
+          <div class="mini-stat">
+            <strong>{{ totalHabitSteps }}</strong>
             <span>习惯步骤</span>
           </div>
         </div>
@@ -87,9 +92,9 @@ onMounted(loadLibraries)
           📋 子任务库
           <span class="badge">{{ totalSubTasks }}</span>
         </button>
-        <button class="tab-btn" :class="{ active: activeTab === 'steps' }" @click="activeTab = 'steps'">
-          📝 步骤库
-          <span class="badge">{{ totalSteps }}</span>
+        <button class="tab-btn" :class="{ active: activeTab === 'habits' }" @click="activeTab = 'habits'">
+          🌱 习惯库
+          <span class="badge">{{ totalHabits }}</span>
         </button>
         <div class="tab-slider-manager" :class="`slide-${activeTab}`" />
       </div>
@@ -120,24 +125,36 @@ onMounted(loadLibraries)
       </p>
     </section>
 
-    <!-- Step Library -->
-    <section v-show="activeTab === 'steps'">
-      <div v-if="stepLibrary.length" class="list">
-        <div v-for="(s, i) in stepLibrary" :key="s.pk_sop_steps || i" class="list-row">
-          <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
-            <span class="sub-index">{{ s.order || i + 1 }}</span>
-            <div style="min-width:0">
-              <strong>{{ s.instruction }}</strong>
-              <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
-                <span class="mini-tag" style="background:#f0fdf4;color:#166534">源自：{{ s.habit_title || '未知习惯' }}</span>
-                <span v-if="s.image_url || s.gif_url" class="mini-tag" style="background:#fef3c7">🖼️ 有图示</span>
+    <!-- Habit Library -->
+    <section v-show="activeTab === 'habits'">
+      <div v-if="habitLibrary.length" class="list">
+        <div v-for="(h, i) in habitLibrary" :key="h.pk_habit_sops || i" class="list-row habit-inv-row">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:12px">
+              <span class="sub-index">{{ i + 1 }}</span>
+              <div style="min-width:0;flex:1">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                  <strong style="font-size:16px">{{ h.title }}</strong>
+                  <span class="mini-tag">☀️ +{{ h.reward_points }}/步</span>
+                  <span class="mini-tag" style="background:#f0fdf4;color:#166534">{{ h.steps?.length ?? 0 }} 个步骤</span>
+                  <span v-if="h.active === false" class="mini-tag" style="background:#fee2e2;color:#991b1b">已停用</span>
+                </div>
+                <div v-if="h.steps?.length" class="habit-steps-preview">
+                  <div v-for="(step, sIdx) in h.steps" :key="sIdx" class="step-preview-item">
+                    <b class="step-num-small">{{ step.order }}</b>
+                    <span>{{ step.instruction }}</span>
+                  </div>
+                </div>
               </div>
             </div>
+          </div>
+          <div class="stat-chip" style="flex-shrink:0;align-self:flex-start">
+            🕐 {{ formatDate(h.created_at) }}
           </div>
         </div>
       </div>
       <p v-else class="muted" style="text-align:center;padding:32px">
-        暂无习惯步骤，在「习惯管理」中创建习惯并添加步骤后就会出现在这里。
+        暂无习惯，在「任务与习惯」中创建习惯后就会出现在这里。
       </p>
     </section>
   </div>
@@ -194,7 +211,7 @@ onMounted(loadLibraries)
 }
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-top: 12px;
 }
@@ -266,6 +283,36 @@ onMounted(loadLibraries)
   color: #fff;
   font-size: 13px;
   font-weight: 800;
+  flex-shrink: 0;
+}
+.habit-inv-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.habit-steps-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-left: 40px;
+}
+.step-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #555;
+}
+.step-num-small {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--primary-2);
+  color: #fff;
+  font-size: 11px;
   flex-shrink: 0;
 }
 </style>
