@@ -29,4 +29,5 @@ WORKDIR /app
 COPY --from=builder /app/dist /app/dist-orig
 
 # 将构建产物拷贝到共享 volume (/app/dist)，供 nginx 的 /var/www/html 挂载
-CMD cp -rf /app/dist-orig/. /app/dist/
+# 先清理旧文件，再复制新产物，避免旧 hash 文件残留导致页面不更新
+CMD rm -rf /app/dist/* && cp -rf /app/dist-orig/. /app/dist/
