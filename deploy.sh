@@ -54,6 +54,16 @@ else
   git -C "$DEPLOY_PATH/src" reset --hard "origin/$GIT_BRANCH"
   echo "已更新仓库到 origin/$GIT_BRANCH"
 fi
+# 验证代码版本
+echo "--- 验证代码版本 ---"
+git -C "$DEPLOY_PATH/src" log --oneline -1
+REMOTE_HASH=$(git ls-remote "$GIT_REPO" "refs/heads/$GIT_BRANCH" | cut -c1-7)
+LOCAL_HASH=$(git -C "$DEPLOY_PATH/src" log --oneline -1 | cut -d' ' -f1)
+echo "远程最新: $REMOTE_HASH  本地: $LOCAL_HASH"
+if [ "$REMOTE_HASH" != "$LOCAL_HASH" ]; then
+  echo "错误: 本地代码与远程不一致，拉取失败！"
+  exit 1
+fi
 
 echo ""
 echo ">>> [3/5] 同步部署配置"

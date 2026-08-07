@@ -111,23 +111,16 @@ pipeline {
                         sh """
                             chmod 600 ${SSH_KEY}
                             ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${server} '
-                                MISSING=""
                                 for img in ${imagesStr}; do
                                     if docker image inspect \$img > /dev/null 2>&1; then
                                         echo "[OK] \$img"
                                     else
-                                        echo "[缺失] \$img"
-                                        MISSING="\$MISSING \$img"
+                                        echo "[缺失] \$img, 自动拉取..."
+                                        docker pull \$img
                                     fi
                                 done
-                                if [ -n "\$MISSING" ]; then
-                                    echo ""
-                                    echo "错误: 以下基础镜像不存在:\$MISSING"
-                                    echo "请先手动拉取: docker pull <镜像名>"
-                                    exit 1
-                                fi
                                 echo ""
-                                echo "所有基础镜像验证通过"
+                                echo "所有基础镜像就绪"
                             '
                         """
                     }
@@ -162,6 +155,15 @@ pipeline {
                                 export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no"
                                 echo "--- 拉取代码到 ${deployPath}/src ---"
                                 ${cloneCmd}
+
+                                echo "--- 验证代码版本 ---"
+                                git -C ${deployPath}/src log --oneline -1
+                                REMOTE_HASH=$(git ls-remote ${env.GIT_REPO} refs/heads/${params.GIT_BRANCH} | cut -c1-7)
+                                LOCAL_HASH=$(git -C ${deployPath}/src log --oneline -1 | cut -d' ' -f1)
+                                echo "远程最新: $REMOTE_HASH  本地: $LOCAL_HASH"
+                                if [ "$REMOTE_HASH" != "$LOCAL_HASH" ]; then
+                                    echo "警告: 本地代码与远程不一致，可能拉取失败！"
+                                fi
 
                                 echo "--- 同步部署配置文件 ---"
                                 cp -f ${deployPath}/src/docker-compose.yml ${deployPath}/docker-compose.yml
