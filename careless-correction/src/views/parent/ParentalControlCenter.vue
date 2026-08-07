@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { categoryLabels, gradeLabel } from '../../utils/constants'
 import { api, normalizeTask } from '../../utils/api'
-import { useBadgeStore, useChildSelectStore, useMistakeStore, useParentStore, useTaskStore, useUserStore } from '../../stores'
+import { useBadgeStore, useChildSelectStore, useMistakeStore, useParentStore, useTaskStore } from '../../stores'
 import ChildSelector from '../../components/ChildSelector.vue'
 
 const parentStore = useParentStore()
 const taskStore = useTaskStore()
-const userStore = useUserStore()
 const mistakeStore = useMistakeStore()
 const childSelectStore = useChildSelectStore()
 const badgeStore = useBadgeStore()
