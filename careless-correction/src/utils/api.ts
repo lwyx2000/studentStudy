@@ -485,6 +485,12 @@ export const api = {
       if (childId) params.set('child_id', childId)
       return request<{ success: boolean; apples: number; redeemed: number }>(`/points/apples/redeem?${params}`, { method: 'POST' })
     },
+
+    // ── 待收集阳光 API ──
+    getPendingSunlight: (childId?: string) =>
+      request<{ pending: any[]; totalPending: number }>(`/points/pending-sunlight${childId ? `?child_id=${childId}` : ''}`),
+    collectSunlight: (sunlightId: number) =>
+      request<{ success: boolean; amount: number; balance: number }>(`/points/pending-sunlight/${sunlightId}/collect`, { method: 'POST' }),
   },
 
   checkins: {
@@ -497,6 +503,8 @@ export const api = {
     },
     getPending: () =>
       request<{ pending: any[] }>('/checkins/pending'),
+    getHistory: (limit = 50) =>
+      request<{ history: any[] }>(`/checkins/history?limit=${limit}`),
     approve: (id: number) =>
       request<{ success: boolean; awarded: number }>(`/checkins/${id}/approve`, { method: 'POST' }),
     reject: (id: number) =>

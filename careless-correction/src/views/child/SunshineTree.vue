@@ -5,6 +5,7 @@ import {
   Container,
   Graphics,
   Sprite,
+  Text,
   Texture,
   Assets,
   type Ticker,
@@ -42,6 +43,9 @@ let textures: Record<string, Texture> = {}
 // ── Scene object collections ──
 interface SunOrbObj {
   sprite: Sprite
+  label: Text | null
+  pendingId: number
+  amount: number
   baseX: number
   baseY: number
   phase: number
@@ -119,6 +123,7 @@ let sceneWidth = 800
 const showGrowAnim = ref(false)
 const growMessage = ref('')
 const shakeTree = ref(false)
+const collectMessage = ref('')
 
 function clickTree() {
   if (!userStore.canGrowApple) {
@@ -416,24 +421,35 @@ function drawApplesOnTree() {
   }
 }
 
-// ── Sun Orbs (sprites from 3.png, small) ──
+// ── Sun Orbs (待收集阳光，sprites from 3.png) ──
 function updateOrbs() {
   if (!app || !textures.sun) return
-  const target = Math.min(userStore.sunlightPoints, MAX_ORBS)
-  while (sunOrbs.length > target) {
-    const orb = sunOrbs.pop()!
-    app.stage.removeChild(orb.sprite)
-    orb.sprite.destroy()
+  const pending = userStore.pendingSunlight
+
+  // Remove orbs no longer in pending (skip flying ones)
+  for (let i = sunOrbs.length - 1; i >= 0; i--) {
+    const orb = sunOrbs[i]
+    if (!orb.flying && !pending.some(p => p.id === orb.pendingId)) {
+      app.stage.removeChild(orb.sprite)
+      if (orb.label) app.stage.removeChild(orb.label)
+      orb.sprite.destroy()
+      if (orb.label) orb.label.destroy()
+      sunOrbs.splice(i, 1)
+    }
   }
-  while (sunOrbs.length < target) {
-    const i = sunOrbs.length
-    const orb = createOrb(i)
+
+  // Add orbs for new pending items
+  for (const p of pending) {
+    if (sunOrbs.some(o => o.pendingId === p.id)) continue
+    if (sunOrbs.length >= MAX_ORBS) break
+    const orb = createOrb(p.id, p.amount, sunOrbs.length)
     sunOrbs.push(orb)
     app.stage.addChild(orb.sprite)
+    if (orb.label) app.stage.addChild(orb.label)
   }
 }
 
-function createOrb(index: number): SunOrbObj {
+function createOrb(pendingId: number, amount: number, index: number): SunOrbObj {
   const col = index % 5
   const row = Math.floor(index / 5)
   const baseX = sceneWidth * (0.06 + col * 0.16 + ((row % 2) * 0.08))
@@ -443,13 +459,27 @@ function createOrb(index: number): SunOrbObj {
   sprite.anchor.set(0.5)
   sprite.x = baseX
   sprite.y = baseY
-  sprite.scale.set(0.16)
+  sprite.scale.set(0.2)
   sprite.eventMode = 'static'
   sprite.cursor = 'pointer'
-  sprite.hitArea = { contains: (x: number, y: number) => Math.abs(x) < 25 && Math.abs(y) < 25 }
+  sprite.hitArea = { contains: (x: number, y: number) => Math.abs(x) < 30 && Math.abs(y) < 30 }
+
+  // Amount label
+  const label = new Text({
+    text: `+${amount}`,
+    style: {
+      fontSize: 14,
+      fill: '#e65100',
+      fontWeight: 'bold',
+      stroke: { color: '#ffffff', width: 3 },
+    },
+  })
+  label.anchor.set(0.5)
+  label.x = baseX
+  label.y = baseY
 
   const orbObj: SunOrbObj = {
-    sprite, baseX, baseY,
+    sprite, label, pendingId, amount, baseX, baseY,
     phase: Math.random() * Math.PI * 2,
     flying: false, flyT: 0,
     flyStartX: 0, flyStartY: 0, flyTargetX: 0, flyTargetY: 0,
@@ -464,6 +494,13 @@ function createOrb(index: number): SunOrbObj {
     orbObj.flyTargetX = sceneWidth / 2
     orbObj.flyTargetY = SCENE_HEIGHT - 200
     sprite.eventMode = 'none'
+    // 调用 store 收集阳光（乐观更新）
+    userStore.collectSunlight(orbObj.pendingId)
+    // 显示收集提示
+    collectMessage.value = `☀️ 收集了 ${orbObj.amount} 阳光！`
+    setTimeout(() => {
+      collectMessage.value = ''
+    }, 2500)
   })
 
   return orbObj
@@ -568,7 +605,8 @@ function update(ticker: Ticker) {
   }
 
   // Sun orbs: float + fly animation
-  for (const orb of sunOrbs) {
+  for (let i = sunOrbs.length - 1; i >= 0; i--) {
+    const orb = sunOrbs[i]
     if (orb.flying) {
       orb.flyT += dt / 60
       const t = Math.min(orb.flyT / 1.2, 1)
@@ -576,19 +614,29 @@ function update(ticker: Ticker) {
       orb.sprite.x = orb.flyStartX + (orb.flyTargetX - orb.flyStartX) * ease
       orb.sprite.y = orb.flyStartY + (orb.flyTargetY - orb.flyStartY) * ease
       orb.sprite.y -= Math.sin(t * Math.PI) * 40
-      orb.sprite.scale.set(0.16 * (1 - t * 0.7))
+      orb.sprite.scale.set(0.2 * (1 - t * 0.7))
       orb.sprite.alpha = 1 - t
+      if (orb.label) {
+        orb.label.x = orb.sprite.x
+        orb.label.y = orb.sprite.y
+        orb.label.alpha = orb.sprite.alpha
+        orb.label.scale.set(1 - t * 0.5)
+      }
       if (t >= 1) {
-        orb.flying = false
-        orb.sprite.x = orb.baseX
-        orb.sprite.y = orb.baseY
-        orb.sprite.scale.set(0.16)
-        orb.sprite.alpha = 1
-        orb.sprite.eventMode = 'static'
+        // 飞行动画结束，销毁精灵
+        app?.stage.removeChild(orb.sprite)
+        if (orb.label) app?.stage.removeChild(orb.label)
+        orb.sprite.destroy()
+        if (orb.label) orb.label.destroy()
+        sunOrbs.splice(i, 1)
       }
     } else {
       orb.sprite.y = orb.baseY + Math.sin(elapsed * 0.03 + orb.phase) * 8
       orb.sprite.x = orb.baseX + Math.sin(elapsed * 0.02 + orb.phase * 0.5) * 3
+      if (orb.label) {
+        orb.label.x = orb.sprite.x
+        orb.label.y = orb.sprite.y
+      }
     }
   }
 
@@ -728,6 +776,7 @@ function rebuildScene() {
     child.destroy()
   }
   sunOrbs = []
+  // Labels are children of stage, destroyed above
   birds = []
   leaves = []
   sparkles = []
@@ -750,7 +799,7 @@ function rebuildScene() {
 }
 
 // ── Watch store changes ──
-watch(() => userStore.sunlightPoints, () => updateOrbs())
+watch(() => userStore.pendingSunlight, () => updateOrbs(), { deep: true })
 watch(() => userStore.apples, () => drawApplesOnTree())
 
 // ── Lifecycle ──
@@ -773,10 +822,17 @@ onUnmounted(() => {
   <div class="page sunshine-tree-page">
     <!-- Scene: PixiJS Canvas -->
     <div ref="sceneRef" class="scene">
-      <!-- Orb count label overlay -->
-      <div v-if="userStore.sunlightPoints > 0" class="orb-count-label">
-        {{ userStore.sunlightPoints }} ☀️
+      <!-- Pending sunlight count label overlay -->
+      <div v-if="userStore.pendingSunlight.length > 0" class="orb-count-label">
+        {{ userStore.pendingSunlight.length }} 个待收集 ☀️
       </div>
+
+      <!-- Collect message toast -->
+      <Transition name="toast">
+        <div v-if="collectMessage" class="grow-toast toast-success">
+          <Typewriter :text="collectMessage" :speed="50" :auto-play="true" />
+        </div>
+      </Transition>
 
       <!-- Grow message toast (with Typewriter animation) -->
       <Transition name="toast">
@@ -869,11 +925,11 @@ onUnmounted(() => {
       <div class="tips-grid">
         <div class="tip-item">
           <span class="tip-icon">☀️</span>
-          <p>完成每日打卡和任务获得阳光值，天空中会显示对应数量的太阳</p>
+          <p>家长审批打卡后，阳光树上会出现待收集的太阳</p>
         </div>
         <div class="tip-item">
           <span class="tip-icon">✨</span>
-          <p>点击天空中的太阳，阳光会飞向苹果树</p>
+          <p>点击天空中的太阳收集阳光，阳光值正式加入你的账户</p>
         </div>
         <div class="tip-item">
           <span class="tip-icon">🌳</span>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../stores'
 import { api, clearAuthToken, setAuthToken } from '../utils/api'
@@ -27,7 +27,10 @@ function toggleSidebar() {
 watch(
   () => route.fullPath,
   () => {
-    if (isParent.value && !isViewingAsChild.value) return
+    if (isParent.value && !isViewingAsChild.value) {
+      fetchPendingCount()
+      return
+    }
     userStore.fetchFromApi()
   },
 )
@@ -69,6 +72,29 @@ async function changePassword() {
   }
 }
 
+// 待审批数量（家长端显示徽章）
+const pendingCheckinCount = ref(0)
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+async function fetchPendingCount() {
+  if (!isParent.value || isViewingAsChild.value) return
+  try {
+    const res = await api.checkins.getPending()
+    pendingCheckinCount.value = (res.pending ?? []).length
+  } catch { /* offline */ }
+}
+
+onMounted(() => {
+  if (isParent.value) {
+    fetchPendingCount()
+    pollTimer = setInterval(fetchPendingCount, 30000)
+  }
+})
+
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
+})
+
 const childNavItems = [
   { name: 'Dashboard', path: '/dashboard', icon: '🌳', label: '协同仪表盘' },
   { name: 'HabitCenter', path: '/habit', icon: '✅', label: '每日打卡' },
@@ -80,6 +106,7 @@ const childNavItems = [
   { name: 'BadgeRoom', path: '/badge', icon: '🏅', label: '勋章馆' },
 ]
 const parentNavItems = [
+  { name: 'CheckinApproval', path: '/parent/checkins', icon: '⏳', label: '待审批' },
   { name: 'ParentControl', path: '/parent', icon: '🧭', label: '家长控制' },
   { name: 'ChildManagement', path: '/parent/children', icon: '👦', label: '孩子管理' },
   { name: 'ProgressDashboard', path: '/parent/progress', icon: '📊', label: '进度查看' },
@@ -151,6 +178,7 @@ function logout() {
         >
           <span class="nav-icon">{{ item.icon }}</span>
           <span v-if="!sidebarCollapsed" class="nav-label">{{ item.label }}</span>
+          <span v-if="item.name === 'CheckinApproval' && pendingCheckinCount > 0" class="nav-badge">{{ pendingCheckinCount }}</span>
         </router-link>
       </nav>
     </aside>
@@ -219,12 +247,31 @@ function logout() {
 .clickable-card:hover { background: #f7fcef; }
 .nav-list { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
 .nav-list.nav-collapsed { margin-top: 18px; gap: 6px; }
-.nav-item { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 18px; color: var(--muted); text-decoration: none; font-weight: 850; transition: all .15s ease; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 18px; color: var(--muted); text-decoration: none; font-weight: 850; transition: all .15s ease; position: relative; }
 .nav-list.nav-collapsed .nav-item { justify-content: center; padding: 13px 0; }
 .nav-icon { font-size: 20px; flex-shrink: 0; }
 .nav-label { white-space: nowrap; overflow: hidden; }
 .nav-item:hover { background: rgba(255,255,255,.8); color: var(--ink); }
 .nav-item.active { color: #fff; background: var(--primary); box-shadow: 0 10px 24px rgba(16,110,0,.22); }
+.nav-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: #e65100;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  border-radius: 999px;
+  min-width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+  animation: badgePulse 1.5s infinite;
+}
+@keyframes badgePulse {
+  50% { box-shadow: 0 0 0 4px rgba(230, 81, 0, .2); }
+}
 .content { padding: 28px; overflow: auto; }
 /* 修改密码弹窗 */
 .overlay {

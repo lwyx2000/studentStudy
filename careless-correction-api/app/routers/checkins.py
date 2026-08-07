@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import CheckIn, HabitSOP, SOPStep, SunlightHistory, Task, User
+from app.models import CheckIn, HabitSOP, PendingSunlight, SOPStep, SunlightHistory, Task, User
 from app.routers.badges import auto_unlock_badges
 from app.schemas import TaskOut
 
@@ -132,16 +132,17 @@ def approve_checkin(
         raise HTTPException(status_code=400, detail='该打卡已审批')
     record.status = 'approved'
     record.approved_at = datetime.now()
-    child.sunlight_points += record.total_points
-    # 记录阳光值变动历史
+    # 不再直接增加 sunlight_points，而是生成「待收集阳光」记录
+    # 孩子需在阳光树页面点击收集后才正式变为阳光值
     if record.total_points > 0:
-        history = SunlightHistory(
+        pending = PendingSunlight(
             fk_users=child.pk_users,
             amount=record.total_points,
             reason=f'打卡审批通过（{record.check_date}）',
-            type='earn',
+            fk_check_ins=record.pk_check_ins,
+            collected=False,
         )
-        db.add(history)
+        db.add(pending)
     # 更新连续打卡天数
     _update_streak_days(child, db, record.check_date)
     db.commit()
@@ -151,6 +152,7 @@ def approve_checkin(
         'success': True,
         'childName': child.name,
         'awarded': record.total_points,
+        'pendingSunlight': True,
         'balance': child.sunlight_points,
         'streakDays': child.streak_days,
         'newly_unlocked_badges': newly_unlocked,
@@ -174,6 +176,42 @@ def reject_checkin(
     record.status = 'rejected'
     db.commit()
     return {'success': True, 'childName': child.name}
+
+
+@router.get('/history')
+def get_checkin_history(
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取已审批的打卡历史记录"""
+    records = (
+        db.query(CheckIn)
+        .join(User, CheckIn.fk_users == User.pk_users)
+        .filter(
+            User.fk_users_parent == current_user.pk_users,
+            CheckIn.status != 'pending',
+        )
+        .order_by(CheckIn.pk_check_ins.desc())
+        .limit(limit)
+        .all()
+    )
+    result = []
+    for r in records:
+        child = db.query(User).filter(User.pk_users == r.fk_users).first()
+        result.append({
+            'id': r.pk_check_ins,
+            'childId': r.fk_users,
+            'childName': child.name if child else '未知',
+            'checkDate': r.check_date,
+            'totalPoints': r.total_points,
+            'habitStepCount': r.habit_step_count,
+            'taskCount': r.task_count,
+            'status': r.status,
+            'createdAt': r.created_at.isoformat() if r.created_at else None,
+            'approvedAt': r.approved_at.isoformat() if r.approved_at else None,
+        })
+    return {'history': result}
 
 
 @router.get('/{checkin_id}/details')

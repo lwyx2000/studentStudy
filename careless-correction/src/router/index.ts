@@ -66,6 +66,12 @@ const routes = [
     meta: { parentOnly: true },
   },
   {
+    path: '/parent/checkins',
+    name: 'CheckinApproval',
+    component: () => import('../views/parent/CheckinApproval.vue'),
+    meta: { parentOnly: true },
+  },
+  {
     path: '/parent/children',
     name: 'ChildManagement',
     component: () => import('../views/parent/ChildManagement.vue'),

@@ -397,3 +397,20 @@ class AppleHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     user = relationship('User', backref='apple_history')
+
+
+class PendingSunlight(Base):
+    """待收集的阳光：家长审批通过后生成，孩子点击收集后才正式变为阳光值。"""
+    __tablename__ = 't_pending_sunlight'
+
+    pk_pending_sunlight: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fk_users: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(200), nullable=False)
+    fk_check_ins: Mapped[int | None] = mapped_column(Integer, ForeignKey('t_check_ins.pk_check_ins'), nullable=True)
+    collected: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    collected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user = relationship('User', backref='pending_sunlight')
+    checkin = relationship('CheckIn', backref='pending_sunlight_records')

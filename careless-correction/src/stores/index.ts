@@ -82,6 +82,15 @@ export const useUserStore = defineStore('user', () => {
   const apples = ref(0)
   const appleHistory = ref<AppleRecord[]>([])
 
+  // ── 待收集阳光（家长审批通过后生成，孩子点击收集后正式变为阳光值）──
+  export interface PendingSunlightItem {
+    id: number
+    amount: number
+    reason: string
+    createdAt: string
+  }
+  const pendingSunlight = ref<PendingSunlightItem[]>([])
+
   const isLowGrade = computed(() => profile.value.grade <= 2)
   const isHighGrade = computed(() => profile.value.grade >= 5)
 
@@ -121,6 +130,46 @@ export const useUserStore = defineStore('user', () => {
         timestamp: h.created_at ?? h.timestamp ?? new Date().toISOString(),
       }))
     } catch { /* offline */ }
+    // 加载待收集阳光
+    try {
+      const res = await api.points.getPendingSunlight(childId)
+      pendingSunlight.value = (res.pending ?? []).map((p: any) => ({
+        id: p.id,
+        amount: p.amount,
+        reason: p.reason ?? '',
+        createdAt: p.createdAt ?? p.created_at ?? new Date().toISOString(),
+      }))
+    } catch { /* offline */ }
+  }
+
+  async function fetchPendingSunlight() {
+    try {
+      const res = await api.points.getPendingSunlight()
+      pendingSunlight.value = (res.pending ?? []).map((p: any) => ({
+        id: p.id,
+        amount: p.amount,
+        reason: p.reason ?? '',
+        createdAt: p.createdAt ?? p.created_at ?? new Date().toISOString(),
+      }))
+    } catch { /* offline */ }
+  }
+
+  async function collectSunlight(sunlightId: number): Promise<boolean> {
+    const item = pendingSunlight.value.find(p => p.id === sunlightId)
+    if (!item) return false
+    // 乐观更新：先移除待收集项，增加阳光值
+    pendingSunlight.value = pendingSunlight.value.filter(p => p.id !== sunlightId)
+    sunlightPoints.value += item.amount
+    try {
+      const res = await api.points.collectSunlight(sunlightId)
+      if (res?.balance !== undefined) sunlightPoints.value = res.balance
+      return true
+    } catch {
+      // 回滚
+      sunlightPoints.value -= item.amount
+      pendingSunlight.value.unshift(item)
+      return false
+    }
   }
 
   function setProfile(p: Partial<UserProfile>) {
@@ -256,6 +305,9 @@ export const useUserStore = defineStore('user', () => {
     removeRewardItem,
     growApple,
     redeemApple,
+    pendingSunlight,
+    fetchPendingSunlight,
+    collectSunlight,
   }
 })
 

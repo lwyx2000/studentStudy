@@ -1,9 +1,11 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import AppleHistory, RewardItem, SunlightHistory, User
+from app.models import AppleHistory, PendingSunlight, RewardItem, SunlightHistory, User
 from app.routers.badges import auto_unlock_badges
 
 router = APIRouter()
@@ -282,4 +284,79 @@ def redeem_apple(
         'success': True,
         'apples': target.apples,
         'redeemed': count,
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+#  待收集阳光 API
+# ══════════════════════════════════════════════════════════════
+
+@router.get('/pending-sunlight')
+def get_pending_sunlight(
+    child_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取孩子未收集的阳光列表"""
+    target = resolve_target(current_user, child_id, db)
+    records = (
+        db.query(PendingSunlight)
+        .filter(
+            PendingSunlight.fk_users == target.pk_users,
+            PendingSunlight.collected == False,
+        )
+        .order_by(PendingSunlight.created_at.desc())
+        .all()
+    )
+    return {
+        'pending': [
+            {
+                'id': r.pk_pending_sunlight,
+                'amount': r.amount,
+                'reason': r.reason,
+                'createdAt': r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in records
+        ],
+        'totalPending': sum(r.amount for r in records),
+    }
+
+
+@router.post('/pending-sunlight/{sunlight_id}/collect')
+def collect_sunlight(
+    sunlight_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """孩子收集一条待收集阳光，正式变为阳光值"""
+    record = db.query(PendingSunlight).filter(
+        PendingSunlight.pk_pending_sunlight == sunlight_id,
+    ).first()
+    if not record:
+        raise HTTPException(status_code=404, detail='待收集阳光不存在')
+    if record.fk_users != current_user.pk_users:
+        raise HTTPException(status_code=403, detail='无权收集该阳光')
+    if record.collected:
+        raise HTTPException(status_code=400, detail='该阳光已收集')
+    # 标记为已收集
+    record.collected = True
+    record.collected_at = datetime.now()
+    # 正式增加阳光值
+    current_user.sunlight_points += record.amount
+    # 记录阳光值变动历史
+    history = SunlightHistory(
+        fk_users=current_user.pk_users,
+        amount=record.amount,
+        reason=record.reason,
+        type='earn',
+    )
+    db.add(history)
+    db.commit()
+    # Check badge auto-unlock after collecting sunlight
+    newly_unlocked = auto_unlock_badges(current_user, db)
+    return {
+        'success': True,
+        'amount': record.amount,
+        'balance': current_user.sunlight_points,
+        'newly_unlocked_badges': newly_unlocked,
     }

@@ -14,6 +14,30 @@ const selectedChild = computed(() => childSelectStore.selectedChild)
 
 const loadingData = ref(false)
 
+// ── 待审批打卡提醒 ──
+const pendingCheckins = ref<any[]>([])
+
+async function loadPendingCheckins() {
+  try {
+    const res = await api.checkins.getPending()
+    pendingCheckins.value = res.pending ?? []
+  } catch { /* offline */ }
+}
+
+async function quickApprove(id: number) {
+  try {
+    await api.checkins.approve(id)
+    pendingCheckins.value = pendingCheckins.value.filter(c => c.id !== id)
+  } catch { /* offline */ }
+}
+
+async function quickReject(id: number) {
+  try {
+    await api.checkins.reject(id)
+    pendingCheckins.value = pendingCheckins.value.filter(c => c.id !== id)
+  } catch { /* offline */ }
+}
+
 async function loadData() {
   loadingData.value = true
   const childId = childSelectStore.selectedChildId ?? undefined
@@ -28,6 +52,8 @@ async function loadData() {
   try {
     await mistakeStore.fetchFromApi(childId)
   } catch { /* offline */ }
+  // 加载待审批打卡
+  await loadPendingCheckins()
   loadingData.value = false
 }
 
@@ -148,6 +174,31 @@ function formatDateShort(dateStr?: string): string {
     </section>
 
     <ChildSelector />
+
+    <!-- ⏳ 待审批打卡提醒 -->
+    <section v-if="pendingCheckins.length" class="pending-banner">
+      <div class="pending-banner-header">
+        <h2>⏳ {{ pendingCheckins.length }} 条待审批打卡</h2>
+        <span class="pending-count">{{ pendingCheckins.length }}</span>
+      </div>
+      <p class="pending-desc">孩子已提交打卡，请尽快审批。审批通过后阳光会出现在阳光树上，孩子点击收集后正式变为阳光值。</p>
+      <div class="pending-list">
+        <div
+          v-for="ci in pendingCheckins"
+          :key="ci.id"
+          class="pending-item"
+        >
+          <div class="pending-item-info">
+            <strong>{{ ci.childName }}</strong>
+            <span class="muted">{{ ci.checkDate }} · {{ ci.totalPoints }} 阳光 · {{ ci.taskCount }} 任务</span>
+          </div>
+          <div class="pending-actions">
+            <button class="btn approve-btn" @click="quickApprove(ci.id)">✅ 通过</button>
+            <button class="btn reject-btn" @click="quickReject(ci.id)">❌ 驳回</button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- 加载提示 -->
     <section v-if="loadingData" class="panel" style="text-align:center;padding:24px">
@@ -289,6 +340,88 @@ function formatDateShort(dateStr?: string): string {
 </template>
 
 <style scoped>
+/* ── 待审批提醒横幅 ── */
+.pending-banner {
+  border: 2px solid #ff9800;
+  background: linear-gradient(135deg, #fff8e1, #fff);
+  border-radius: 24px;
+  padding: 20px 24px;
+  margin-bottom: 18px;
+}
+.pending-banner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pending-banner-header h2 {
+  font-size: 18px;
+  font-weight: 800;
+  color: #e65100;
+}
+.pending-count {
+  background: #ff9800;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  border-radius: 999px;
+  min-width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+}
+.pending-desc {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 8px 0 12px;
+}
+.pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pending-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid #ffe0b2;
+}
+.pending-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pending-item-info strong {
+  font-size: 15px;
+}
+.pending-item-info .muted {
+  font-size: 12px;
+}
+.pending-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.approve-btn {
+  background: var(--primary) !important;
+  color: #fff !important;
+  border: none !important;
+  padding: 8px 16px !important;
+  font-size: 13px !important;
+}
+.reject-btn {
+  background: #fff !important;
+  color: #d32f2f !important;
+  border: 2px solid #ffcdd2 !important;
+  padding: 6px 14px !important;
+  font-size: 13px !important;
+}
+
 .stat-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
