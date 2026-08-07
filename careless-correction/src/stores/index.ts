@@ -70,6 +70,13 @@ export interface AppleRecord {
   timestamp: string
 }
 
+export interface PendingSunlightItem {
+  id: number
+  amount: number
+  reason: string
+  createdAt: string
+}
+
 const SUNLIGHT_PER_APPLE = 100
 
 export const useUserStore = defineStore('user', () => {
@@ -83,12 +90,6 @@ export const useUserStore = defineStore('user', () => {
   const appleHistory = ref<AppleRecord[]>([])
 
   // ── 待收集阳光（家长审批通过后生成，孩子点击收集后正式变为阳光值）──
-  export interface PendingSunlightItem {
-    id: number
-    amount: number
-    reason: string
-    createdAt: string
-  }
   const pendingSunlight = ref<PendingSunlightItem[]>([])
 
   const isLowGrade = computed(() => profile.value.grade <= 2)
