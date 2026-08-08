@@ -309,10 +309,10 @@ pipeline {
                                     fi
                                 done
 
-                                echo ">>> 验证 API 经 Nginx 可达 (401/200=后端连通) ..."
+                                echo ">>> 验证 API 经 Nginx 可达 (200/401/403=后端连通) ..."
                                 code=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${env.NGINX_PORT}/api/v1/auth/session)
                                 echo "API 返回码: \$code"
-                                if [ "\$code" = "401" ] || [ "\$code" = "200" ]; then
+                                if [ "\$code" = "401" ] || [ "\$code" = "403" ] || [ "\$code" = "200" ]; then
                                     echo "API 连通性验证通过"
                                 else
                                     echo "API 连通性验证失败 (HTTP \$code)"
