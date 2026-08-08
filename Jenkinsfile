@@ -158,10 +158,10 @@ pipeline {
 
                                 echo "--- 验证代码版本 ---"
                                 git -C ${deployPath}/src log --oneline -1
-                                REMOTE_HASH=$(git ls-remote ${env.GIT_REPO} refs/heads/${params.GIT_BRANCH} | cut -c1-7)
-                                LOCAL_HASH=$(git -C ${deployPath}/src log --oneline -1 | cut -d' ' -f1)
-                                echo "远程最新: $REMOTE_HASH  本地: $LOCAL_HASH"
-                                if [ "$REMOTE_HASH" != "$LOCAL_HASH" ]; then
+                                REMOTE_HASH=\$(git ls-remote ${env.GIT_REPO} refs/heads/${params.GIT_BRANCH} | cut -c1-7)
+                                LOCAL_HASH=\$(git -C ${deployPath}/src log --oneline -1 | cut -d' ' -f1)
+                                echo "远程最新: \$REMOTE_HASH  本地: \$LOCAL_HASH"
+                                if [ "\$REMOTE_HASH" != "\$LOCAL_HASH" ]; then
                                     echo "警告: 本地代码与远程不一致，可能拉取失败！"
                                 fi
 
