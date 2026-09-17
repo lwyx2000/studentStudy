@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../utils/api'
 import { useBadgeStore, useChildSelectStore } from '../../stores'
+import PointsBreakdown from '../../components/PointsBreakdown.vue'
 
 const childSelectStore = useChildSelectStore()
 const badgeStore = useBadgeStore()
@@ -76,14 +77,25 @@ async function approveCheckin(id: number) {
 }
 
 async function rejectCheckin(id: number) {
+  const reason = window.prompt('驳回原因（孩子端可见，可留空）：')
+  if (reason === null) return // 取消
   try {
-    await api.checkins.reject(id)
+    await api.checkins.reject(id, reason.trim() || undefined)
     pendingCheckins.value = pendingCheckins.value.filter(c => c.id !== id)
     if (expandedId.value === id) {
       expandedId.value = null
       checkinDetails.value = null
     }
     await loadHistory()
+  } catch { /* offline */ }
+}
+
+async function reopenCheckin(id: number) {
+  try {
+    await api.checkins.reopen(id)
+    await loadHistory()
+    await loadPending()
+    activeTab.value = 'pending'
   } catch { /* offline */ }
 }
 
@@ -113,7 +125,7 @@ function formatTime(iso?: string): string {
       <div class="hero-card">
         <span class="eyebrow">⏳ 打卡审批</span>
         <h1>待审批打卡列表</h1>
-        <p class="lead">查看孩子提交的所有打卡记录，审批通过后阳光会出现在阳光树上，孩子点击收集后才会正式变为阳光值。</p>
+        <p class="lead">查看孩子提交的所有打卡记录，展开可查看阳光值构成明细（必做小任务分 / 可选⭐加分 / 全部完成奖励）。审批通过后阳光会出现在阳光树上，孩子点击收集后才会正式变为阳光值。</p>
       </div>
       <div class="panel">
         <div class="card-title">
@@ -204,6 +216,10 @@ function formatTime(iso?: string): string {
                     <strong>{{ ci.childName }}</strong>
                     <span class="mini-tag">📅 {{ ci.checkDate }}</span>
                     <span class="mini-tag" style="background:#fff3cd;color:#856404">☀️ +{{ ci.totalPoints }}</span>
+                    <span v-if="ci.requiredPoints" class="mini-tag" style="background:#d4edda;color:#155724">✅ 小任务 +{{ ci.requiredPoints }}</span>
+                    <span v-if="ci.optionalBonus" class="mini-tag" style="background:#fff8d9;color:#8a6d3b">⭐ +{{ ci.optionalBonus }}</span>
+                    <span v-if="ci.allDoneBonus" class="mini-tag" style="background:#ffe0b2;color:#d84315">🎉 +{{ ci.allDoneBonus }}</span>
+                    <span v-if="ci.habitPoints" class="mini-tag" style="background:#cce5ff;color:#004085">🌱 +{{ ci.habitPoints }}</span>
                     <span v-if="ci.taskCount" class="mini-tag" style="background:#d4edda;color:#155724">✅ {{ ci.taskCount }} 项任务</span>
                     <span v-if="ci.habitStepCount" class="mini-tag" style="background:#cce5ff;color:#004085">🌱 {{ ci.habitStepCount }} 步习惯</span>
                   </div>
@@ -225,6 +241,13 @@ function formatTime(iso?: string): string {
                       <strong>{{ checkinDetails.checkin.childName }}</strong>
                       <span class="muted">提交于 {{ checkinDetails.checkin.checkDate }}</span>
                     </div>
+                    <PointsBreakdown
+                      :total-points="checkinDetails.checkin.totalPoints"
+                      :required-points="checkinDetails.checkin.requiredPoints"
+                      :optional-bonus="checkinDetails.checkin.optionalBonus"
+                      :all-done-bonus="checkinDetails.checkin.allDoneBonus"
+                      :habit-points="checkinDetails.checkin.habitPoints"
+                    />
                     <div class="summary-stats">
                       <div class="summary-stat">
                         <span class="summary-num">{{ checkinDetails.checkin.taskCount }}</span>
@@ -253,7 +276,7 @@ function formatTime(iso?: string): string {
                         <span style="font-size:20px;flex-shrink:0">{{ task.icon || '📋' }}</span>
                         <div style="flex:1;min-width:0">
                           <strong>{{ task.title }}</strong>
-                          <span class="muted" style="display:block;font-size:12px">{{ task.description || '无描述' }}</span>
+                          <span class="muted" style="display:block;font-size:12px">{{ task.description || '提交时记录' }}</span>
                         </div>
                         <span class="mini-tag" style="background:#d4edda;color:#155724">✓ 完成</span>
                         <span class="mini-tag">☀️ +{{ task.reward_points }}</span>
@@ -350,14 +373,24 @@ function formatTime(iso?: string): string {
                   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:2px">
                     <span class="mini-tag">📅 {{ h.checkDate }}</span>
                     <span class="mini-tag">☀️ {{ h.totalPoints }}</span>
+                    <span v-if="h.requiredPoints" class="mini-tag">✅ 小任务 +{{ h.requiredPoints }}</span>
+                    <span v-if="h.optionalBonus" class="mini-tag" style="background:#fff8d9;color:#8a6d3b">⭐ +{{ h.optionalBonus }}</span>
+                    <span v-if="h.allDoneBonus" class="mini-tag" style="background:#ffe0b2;color:#d84315">🎉 全部完成 +{{ h.allDoneBonus }}</span>
+                    <span v-if="h.habitPoints" class="mini-tag" style="background:#cce5ff;color:#004085">🌱 习惯 +{{ h.habitPoints }}</span>
                     <span v-if="h.taskCount" class="mini-tag">📋 {{ h.taskCount }} 任务</span>
                     <span class="mini-tag" :class="h.status === 'approved' ? 'status-approved' : 'status-rejected'">
                       {{ h.status === 'approved' ? '已通过' : '已驳回' }}
                     </span>
                   </div>
+                  <div v-if="h.status === 'rejected' && h.rejectReason" class="reject-reason-tip">
+                    💬 驳回原因：{{ h.rejectReason }}
+                  </div>
                   <span class="muted" style="font-size:11px;display:block;margin-top:2px">
                     {{ formatTime(h.approvedAt) }}
                   </span>
+                  <button v-if="h.status === 'rejected'" class="btn ghost reopen-btn" @click="reopenCheckin(h.id)">
+                    ↩️ 重新审批
+                  </button>
                 </div>
               </div>
             </div>
@@ -667,6 +700,24 @@ function formatTime(iso?: string): string {
 .status-rejected {
   background: #f8d7da !important;
   color: #721c24 !important;
+}
+.reject-reason-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #721c24;
+  background: #fff5f5;
+  border-radius: 8px;
+  padding: 4px 8px;
+  display: inline-block;
+}
+.reopen-btn {
+  margin-top: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #1565c0 !important;
+  border-color: #90caf9 !important;
 }
 
 @media (max-width: 900px) {

@@ -31,6 +31,29 @@ def _run_migrations():
             columns = [c['name'] for c in insp.get_columns('t_users')]
             if 'apples' not in columns:
                 conn.execute(text('ALTER TABLE t_users ADD COLUMN apples INTEGER NOT NULL DEFAULT 0'))
+        # 子任务可选标记（加分项）
+        if 't_sub_tasks' in insp.get_table_names():
+            columns = [c['name'] for c in insp.get_columns('t_sub_tasks')]
+            if 'is_optional' not in columns:
+                conn.execute(text('ALTER TABLE t_sub_tasks ADD COLUMN is_optional BOOLEAN NOT NULL DEFAULT 0'))
+            if 'reward_points' not in columns:
+                conn.execute(text('ALTER TABLE t_sub_tasks ADD COLUMN reward_points SMALLINT NULL'))
+        # 打卡阳光值构成明细
+        if 't_check_ins' in insp.get_table_names():
+            columns = [c['name'] for c in insp.get_columns('t_check_ins')]
+            if 'required_points' not in columns:
+                conn.execute(text('ALTER TABLE t_check_ins ADD COLUMN required_points INTEGER NOT NULL DEFAULT 0'))
+            if 'optional_bonus' not in columns:
+                conn.execute(text('ALTER TABLE t_check_ins ADD COLUMN optional_bonus INTEGER NOT NULL DEFAULT 0'))
+            if 'all_done_bonus' not in columns:
+                conn.execute(text('ALTER TABLE t_check_ins ADD COLUMN all_done_bonus INTEGER NOT NULL DEFAULT 0'))
+            if 'habit_points' not in columns:
+                conn.execute(text('ALTER TABLE t_check_ins ADD COLUMN habit_points INTEGER NOT NULL DEFAULT 0'))
+            if 'reject_reason' not in columns:
+                conn.execute(text('ALTER TABLE t_check_ins ADD COLUMN reject_reason TEXT NULL'))
+            if 'completed_tasks_snapshot' not in columns:
+                conn.execute(text('ALTER TABLE t_check_ins ADD COLUMN completed_tasks_snapshot TEXT NULL'))
+        # 苹果兑换审批表由 create_all 创建，无需手工建表
         # 清理已删除功能的历史表（社区/契约）——先删子表再删父表，避免外键约束
         existing = set(insp.get_table_names())
         for table in ('t_covenant_signatures', 't_shared_covenants', 't_post_replies',

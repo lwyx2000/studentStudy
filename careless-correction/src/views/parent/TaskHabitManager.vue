@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useChildSelectStore, useParentStore, useTaskStore, useUserStore } from '../../stores'
 import { api, normalizeSubTask, normalizeTask } from '../../utils/api'
 import { weekDayToLabel } from '../../utils/constants'
@@ -70,6 +70,29 @@ const taskWeekDay = ref('')
 const showWeekdayPicker = ref(false)
 const showSubtaskWeekdayPicker = ref(false)
 
+// ── 子任务默认分值：可选⭐未单独设置时的默认加分 ──
+const OPTIONAL_SUB_BONUS = 2
+// 行内编辑子任务分值的状态
+const editingSubRewardId = ref<string | null>(null)
+const editingSubRewardValue = ref<number | null>(null)
+
+/** 显示用分值：未单独设置时按默认规则展示 */
+function subtaskDisplayPoints(sub: { isOptional?: boolean; rewardPoints?: number }): number {
+  return sub.rewardPoints ?? (sub.isOptional ? OPTIONAL_SUB_BONUS : 0)
+}
+
+function startEditSubReward(subId: string, sub: { isOptional?: boolean; rewardPoints?: number }) {
+  editingSubRewardId.value = subId
+  editingSubRewardValue.value = sub.rewardPoints ?? null
+}
+
+function saveEditSubReward(taskId: string, subId: string) {
+  if (editingSubRewardId.value !== subId) return
+  saveSubtaskRewardPoints(taskId, subId, editingSubRewardValue.value)
+  editingSubRewardId.value = null
+  editingSubRewardValue.value = null
+}
+
 // ── Inventory Picker Modal (for sub-tasks and steps) ──
 const subTaskPickerVisible = ref(false)
 const stepPickerVisible = ref(false)
@@ -110,12 +133,15 @@ function onSubTaskSelected(selected: any[]) {
 
   for (const s of selected) {
     const localId = `st-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const subReward = (s.reward_points ?? s.rewardPoints ?? undefined) as number | undefined
     task.subTasks.push({
       id: localId,
       title: s.title,
       type: s.type || task.type,
       weekDay: s.week_day || undefined,
       sortOrder: task.subTasks.length,
+      isOptional: Boolean(s.is_optional ?? s.isOptional ?? false),
+      rewardPoints: subReward,
     })
     // Sync to backend
     if (/^\d+$/.test(expandedTaskId.value)) {
@@ -124,6 +150,8 @@ function onSubTaskSelected(selected: any[]) {
         type: s.type || task.type,
         weekDay: s.week_day || undefined,
         sortOrder: task.subTasks.length - 1,
+        isOptional: Boolean(s.is_optional ?? s.isOptional ?? false),
+        rewardPoints: subReward,
       }).then((res: any) => {
         const backendId = String(res.pk_sub_tasks ?? '')
         if (backendId && task.subTasks) {
@@ -192,7 +220,7 @@ async function createTask() {
 }
 
 function deleteTask(id: string) {
-  if (!confirm('确定要停用该任务吗？可在「任务清单」中恢复。')) return
+  if (!confirm('确定要删除该任务吗？任务将被停用，不再展示给孩子。')) return
   if (/^\d+$/.test(id)) {
     api.tasks.delete(id).catch(() => { /* offline */ })
   }
@@ -291,7 +319,7 @@ function createHabit() {
 }
 
 function deleteHabit(id: string, title: string) {
-  if (!confirm(`确定要停用习惯「${title}」吗？可在「任务清单」中恢复。`)) return
+  if (!confirm(`确定要删除习惯「${title}」吗？习惯将停止展示给孩子，可在复用库页面恢复。`)) return
   if (editingHabitId.value === id) editingHabitId.value = null
   taskStore.deleteHabit(id)
 }
@@ -301,6 +329,9 @@ const expandedTaskId = ref<string | null>(null)
 const newSubtaskTitle = ref('')
 const newSubtaskWeekDay = ref('')
 const newSubtaskType = ref<TaskCategory | ''>('')
+const newSubtaskOptional = ref(false)
+// 新子任务的独立阳光值；空 = 默认（必做继承主任务分值，可选⭐默认 +2）
+const newSubtaskRewardPoints = ref<number | null>(null)
 
 // Drag-and-drop state
 const dragSubtaskId = ref<string | null>(null)
@@ -309,6 +340,8 @@ const dragOverSubtaskId = ref<string | null>(null)
 async function showSubTasks(taskId: string) {
   expandedTaskId.value = taskId
   newSubtaskTitle.value = ''
+  newSubtaskOptional.value = false
+  newSubtaskRewardPoints.value = null
   const parentTask = parentStore.parentTaskTemplates.find(t => t.id === taskId)
   newSubtaskWeekDay.value = parentTask?.weekDay ?? ''
   newSubtaskType.value = ''
@@ -353,6 +386,8 @@ function addSubtask(taskId: string) {
     type: subtaskType,
     weekDay: newSubtaskWeekDay.value || undefined,
     sortOrder,
+    isOptional: newSubtaskOptional.value,
+    rewardPoints: newSubtaskRewardPoints.value ?? undefined,
   })
   parentStore.updateTaskTemplate(taskId, { subTasks: [...task.subTasks] })
 
@@ -364,6 +399,8 @@ function addSubtask(taskId: string) {
       type: subtaskType,
       weekDay: newSubtaskWeekDay.value || undefined,
       sortOrder,
+      isOptional: newSubtaskOptional.value,
+      rewardPoints: newSubtaskRewardPoints.value ?? undefined,
     }).then((res: any) => {
       const backendId = String(res.pk_sub_tasks ?? '')
       if (backendId) {
@@ -379,6 +416,37 @@ function addSubtask(taskId: string) {
   newSubtaskTitle.value = ''
   newSubtaskWeekDay.value = ''
   newSubtaskType.value = ''
+  newSubtaskOptional.value = false
+  newSubtaskRewardPoints.value = null
+}
+
+/** 切换子任务 必做/可选（加分项） */
+function toggleSubtaskOptional(taskId: string, subtaskId: string) {
+  const task = parentStore.parentTaskTemplates.find(t => t.id === taskId)
+  const sub = task?.subTasks?.find(s => s.id === subtaskId)
+  if (!task || !sub || !task.subTasks) return
+  sub.isOptional = !sub.isOptional
+  // 未单独设置分值时，切换类型会改变默认分值（必做继承主任务分值，可选⭐默认 +2）
+  if (sub.rewardPoints === undefined) {
+    sub.rewardPoints = sub.isOptional ? OPTIONAL_SUB_BONUS : task.rewardPoints
+  }
+  parentStore.updateTaskTemplate(taskId, { subTasks: [...task.subTasks] })
+  if (/^\d+$/.test(taskId) && /^\d+$/.test(subtaskId)) {
+    api.tasks.subtasks.update(taskId, subtaskId, { isOptional: sub.isOptional, rewardPoints: sub.rewardPoints }).catch(() => { /* offline */ })
+  }
+}
+
+/** 保存子任务独立阳光值 */
+function saveSubtaskRewardPoints(taskId: string, subtaskId: string, points: number | null) {
+  const task = parentStore.parentTaskTemplates.find(t => t.id === taskId)
+  const sub = task?.subTasks?.find(s => s.id === subtaskId)
+  if (!task || !sub || !task.subTasks) return
+  const value = (points && points > 0) ? points : undefined
+  sub.rewardPoints = value
+  parentStore.updateTaskTemplate(taskId, { subTasks: [...task.subTasks] })
+  if (/^\d+$/.test(taskId) && /^\d+$/.test(subtaskId)) {
+    api.tasks.subtasks.update(taskId, subtaskId, { rewardPoints: value }).catch(() => { /* offline */ })
+  }
 }
 
 function removeSubtask(taskId: string, subtaskId: string) {
@@ -529,69 +597,66 @@ async function loadAllSubtasks() {
 
 const allTasks = computed(() => parentStore.parentTaskTemplates.filter(t => t.active !== false))
 
-function loadScript(url: string, name: 'html2canvas' | 'jspdf'): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${url}"]`)
-    if (existing) {
-      if (name === 'jspdf') resolve({ jsPDF: (window as any).jspdf.jsPDF })
-      else resolve((window as any).html2canvas)
-      return
-    }
-    const script = document.createElement('script')
-    script.src = url
-    script.onload = () => {
-      if (name === 'jspdf') resolve({ jsPDF: (window as any).jspdf.jsPDF })
-      else resolve((window as any).html2canvas)
-    }
-    script.onerror = reject
-    document.head.appendChild(script)
-  })
-}
-
 async function downloadPdf() {
   if (downloading.value) return
   downloading.value = true
   try {
     const element = document.getElementById('printable-sheet-pdf')
-    if (!element) return
+    if (!element) {
+      alert('清单内容未找到，请刷新页面后重试')
+      return
+    }
 
-    const html2canvas = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', 'html2canvas')
-    const { jsPDF } = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'jspdf')
+    // Let Vue finish rendering the sheet before capturing
+    // Lazy-load bundled libs (no CDN dependency; chunk fetched on first export)
+    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+      import('html2canvas'),
+      import('jspdf'),
+    ])
 
-    await new Promise(r => setTimeout(r, 300))
+    await nextTick()
+    await new Promise(r => setTimeout(r, 100))
 
     const canvas = await html2canvas(element, {
-      scale: 3,
+      scale: 2,
       useCORS: true,
       backgroundColor: '#ffffff',
       logging: false,
+      // Capture correctly even though the sheet is positioned off-screen
+      windowWidth: element.scrollWidth,
+      windowHeight: element.scrollHeight,
     })
 
     const pdf = new jsPDF('p', 'mm', 'a4')
     const pdfWidth = pdf.internal.pageSize.getWidth()
-    const pdfHeight = (canvas.height * pdfWidth) / canvas.width
-
-    let srcY = 0
-    let remainingHeight = pdfHeight
     const pageHeight = pdf.internal.pageSize.getHeight()
 
-    while (remainingHeight > 0) {
+    // Slice the tall canvas into A4 pages, all measured in the same unit (px)
+    const pxPerPage = Math.floor(canvas.width * pageHeight / pdfWidth)
+    let srcY = 0
+    let pageIndex = 0
+
+    while (srcY < canvas.height) {
+      const sliceHeight = Math.min(pxPerPage, canvas.height - srcY)
       const pageCanvas = document.createElement('canvas')
       pageCanvas.width = canvas.width
-      pageCanvas.height = Math.min(canvas.width * pageHeight / pdfWidth, canvas.height - srcY)
+      pageCanvas.height = sliceHeight
       const ctx = pageCanvas.getContext('2d')!
-      ctx.drawImage(canvas, 0, srcY, canvas.width, pageCanvas.height, 0, 0, canvas.width, pageCanvas.height)
-      const pageData = pageCanvas.toDataURL('image/png')
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height)
+      ctx.drawImage(canvas, 0, srcY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight)
 
-      if (srcY > 0) pdf.addPage()
-      pdf.addImage(pageData, 'PNG', 0, 0, pdfWidth, (pageCanvas.height * pdfWidth) / canvas.width)
-      srcY += pageCanvas.height
-      remainingHeight -= pageCanvas.height
+      if (pageIndex > 0) pdf.addPage()
+      pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pdfWidth, (sliceHeight * pdfWidth) / canvas.width)
+
+      srcY += sliceHeight
+      pageIndex++
     }
 
     pdf.save(`${userStore.profile.name || '孩子'}的每日任务与习惯清单.pdf`)
-  } catch {
-    alert('下载失败，请检查网络连接后重试')
+  } catch (e) {
+    console.error('PDF export failed:', e)
+    alert(`导出 PDF 失败：${e instanceof Error ? e.message : '未知错误'}，请重试`)
   } finally {
     downloading.value = false
   }
@@ -607,7 +672,7 @@ async function downloadPdf() {
       <div class="hero-card">
         <span class="eyebrow">📋 任务与习惯管理</span>
         <h1>管理任务和核心习惯</h1>
-        <p class="lead">创建每日任务，设定每周主线习惯 SOP，所有内容会同步到孩子的打卡页面。完成后可在打印预览生成清单。</p>
+        <p class="lead">创建每日任务并添加子任务，维护习惯 SOP 步骤，所有内容会同步到孩子的每日打卡页面。可导出 A4 每日计划清单 PDF。</p>
         <div style="margin-top:14px;display:flex;gap:10px">
           <button class="btn secondary" :disabled="downloading" @click="downloadPdf">
             {{ downloading ? '⏳ 生成中...' : '📥 导出 PDF' }}
@@ -772,6 +837,7 @@ async function downloadPdf() {
         </div>
         <p class="lead" style="font-size:14px;margin-bottom:12px">
           子任务默认继承任务的适用日期，每个子任务也可以单独调整。子任务仅在匹配的日期显示给孩子。
+          每个小任务完成后可获得各自的阳光值：点击分值标签可修改；当所有必做小任务完成时，额外奖励 +10 阳光值。
         </p>
 
         <!-- Existing sub-tasks (draggable) -->
@@ -800,12 +866,37 @@ async function downloadPdf() {
             <span class="subtask-drag">⠿</span>
             <div style="flex:1;min-width:0">
               <strong>{{ sub.title }}</strong>
-              <div style="display:flex;gap:6px;margin-top:4px">
+              <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
                 <span class="mini-tag">{{ categoryOptions.find(c => c.value === sub.type)?.label || sub.type }}</span>
                 <span class="mini-tag">{{ weekDayToLabel(sub.weekDay) }}</span>
-
-              </div>
-            </div>
+                <span
+                  class="mini-tag"
+                  :style="sub.isOptional ? 'background:#fff8d9;color:#8a6d3b' : 'background:#e8f5e9;color:#2e7d32'"
+                >{{ sub.isOptional ? '⭐ 可选 · 加分项' : '必做' }}</span>
+                <span
+                  v-if="editingSubRewardId !== sub.id"
+                  class="mini-tag subtask-points-tag clickable"
+                  style="background:#fff3cd;color:#856404;cursor:pointer"
+                  :title="'点击修改该小任务的阳光值'"
+                  @click.stop="startEditSubReward(sub.id, sub)"
+                >☀️ +{{ subtaskDisplayPoints(sub) }}<template v-if="sub.rewardPoints === undefined">（默认）</template></span>
+                <div v-else class="subtask-points-edit" @click.stop>
+                  <input
+                    v-model.number="editingSubRewardValue"
+                    class="input"
+                    type="number"
+                    min="1"
+                    max="100"
+                    style="width:74px;padding:4px 8px;font-size:12px"
+                    @keyup.enter="saveEditSubReward(expandedTaskId!, sub.id)"
+                  />
+                  <button class="btn" style="padding:4px 10px;font-size:12px" @click="saveEditSubReward(expandedTaskId!, sub.id)">保存</button>
+                </div>              </div>            </div>            <button
+              class="btn ghost"
+              style="padding:4px 10px;font-size:12px;color:#8a6d3b"
+              :title="sub.isOptional ? '点击改为必做' : '点击改为可选（加分项，不完成不影响审核）'"
+              @click.stop="toggleSubtaskOptional(expandedTaskId!, sub.id)"
+            >{{ sub.isOptional ? '设为必做' : '设为可选' }}</button>
             <button class="btn ghost" style="padding:4px 10px;font-size:12px;color:#c00" @click="removeSubtask(expandedTaskId!, sub.id)">删除</button>
           </div>
         </div>
@@ -831,6 +922,23 @@ async function downloadPdf() {
             {{ weekDayToLabel(newSubtaskWeekDay) }}
           </button>
           <WeekdayPicker v-model="newSubtaskWeekDay" v-model:visible="showSubtaskWeekdayPicker" />
+          <input
+            v-model.number="newSubtaskRewardPoints"
+            class="input subtask-reward-input"
+            type="number"
+            min="1"
+            max="100"
+            :placeholder="newSubtaskOptional ? `默认 +${OPTIONAL_SUB_BONUS}` : '默认'"
+            title="该小任务完成后的阳光值；留空则必做继承主任务分值、可选⭐默认+2"
+          />
+          <button
+            type="button"
+            class="btn"
+            :class="newSubtaskOptional ? '' : 'ghost'"
+            style="font-size:13px;padding:4px 12px;color:inherit"
+            :title="'勾选后该子任务为可选：孩子可以不完成，完成后作为加分项'"
+            @click="newSubtaskOptional = !newSubtaskOptional"
+          >{{ newSubtaskOptional ? '⭐ 可选 · 加分项' : '必做' }}</button>
           <button
             class="btn"
             :disabled="!newSubtaskTitle.trim()"
@@ -957,7 +1065,7 @@ async function downloadPdf() {
               <div v-if="task.subTasks?.length" class="pdf-subs">
                 <div v-for="sub in task.subTasks" :key="sub.id" class="pdf-sub">
                   <span class="pdf-box pdf-box-sm">□</span>
-                  <span>{{ sub.title }}</span>
+                  <span>{{ sub.title }}<template v-if="sub.isOptional"> ⭐加分</template></span>
                 </div>
               </div>
             </div>
@@ -1149,6 +1257,21 @@ async function downloadPdf() {
   width: auto;
   min-width: 150px;
   flex: 0 0 auto;
+}
+.subtask-reward-input {
+  width: 92px;
+  flex: 0 0 auto;
+  min-width: 92px;
+  text-align: center;
+}
+.subtask-points-tag {
+  display: inline-flex;
+  align-items: center;
+}
+.subtask-points-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .subtask-add-form .btn {
   white-space: nowrap;

@@ -6,7 +6,6 @@ import type {
   DiagnosticAlert,
   ExecutiveFunctionAssessment,
   GrowthDataPoint,
-  HabitAssignment,
   HabitSOP,
   ItemLossRecord,
   ItemStorageRecord,
@@ -234,8 +233,14 @@ export const useUserStore = defineStore('user', () => {
   const canGrowApple = computed(() => sunlightPoints.value >= SUNLIGHT_PER_APPLE)
   const appleYuanValue = computed(() => apples.value)
 
+  // 双击/连点保护：请求进行中时忽略后续触发
+  let growAppleInFlight = false
+  let redeemAppleInFlight = false
+
   function growApple() {
+    if (growAppleInFlight) return false
     if (sunlightPoints.value < SUNLIGHT_PER_APPLE) return false
+    growAppleInFlight = true
     // 乐观更新 UI
     sunlightPoints.value -= SUNLIGHT_PER_APPLE
     apples.value += 1
@@ -256,30 +261,26 @@ export const useUserStore = defineStore('user', () => {
       sunlightPoints.value += SUNLIGHT_PER_APPLE
       apples.value -= 1
       appleHistory.value.shift()
+    }).finally(() => {
+      growAppleInFlight = false
     })
     return true
   }
 
+  /** 孩子端兑换苹果：现在提交申请，等待家长审批后扣苹果 */
   function redeemApple(count: number, reason: string) {
+    if (redeemAppleInFlight) return 'busy' as const
     if (count <= 0 || apples.value < count) return false
-    // 乐观更新 UI
-    apples.value -= count
-    appleHistory.value.unshift({
-      id: `ap-${Date.now()}`,
-      amount: -count,
-      reason: reason || `兑换 ${count} 元`,
-      type: 'redeem',
-      timestamp: new Date().toISOString(),
-    })
-    // 调用后端持久化
-    api.points.redeemApple(count, reason).then(res => {
+    redeemAppleInFlight = true
+    return api.points.redeemApple(count, reason).then((res: any) => {
       if (res?.apples !== undefined) apples.value = res.apples
-    }).catch(() => {
-      // 失败时回滚
-      apples.value += count
-      appleHistory.value.shift()
+      return 'submitted' as const
+    }).catch((e: any) => {
+      // 已经有待审批申请等情况：把后端错误信息抛给调用方展示
+      throw new Error(e?.message || '提交兑换申请失败')
+    }).finally(() => {
+      redeemAppleInFlight = false
     })
-    return true
   }
 
   return {
@@ -321,25 +322,7 @@ const seededTasks: TaskItem[] = [
 export const useTaskStore = defineStore('task', () => {
   const todayTasks = ref<TaskItem[]>([])
   const habits = ref<HabitSOP[]>([])
-  // 习惯布置记录（与 habits 同源：来自后端习惯库，额外携带描述/图标/周数等展示字段）
-  const habitAssignments = ref<HabitAssignment[]>([])
   const weeklyProgress = computed(() => todayTasks.value.filter(task => task.status === 'completed').length)
-  const activeHabits = computed(() => habitAssignments.value.filter(h => h.active))
-
-  // ── 习惯布置（HabitAssignPage）─────────────────────────────────────────
-  // 后端习惯模型不包含描述/图标/周数等展示字段，用 localStorage 持久化以便跨刷新保留
-  const HABIT_ASSIGN_KEY = 'cc-habit-assignments'
-
-  function loadLocalAssignments(): HabitAssignment[] {
-    try {
-      const raw = localStorage.getItem(HABIT_ASSIGN_KEY)
-      return raw ? JSON.parse(raw) : []
-    } catch { return [] }
-  }
-
-  function saveLocalAssignments() {
-    try { localStorage.setItem(HABIT_ASSIGN_KEY, JSON.stringify(habitAssignments.value)) } catch { /* ignore */ }
-  }
 
   async function fetchFromApi(childId?: string) {
     try {
@@ -451,95 +434,11 @@ export const useTaskStore = defineStore('task', () => {
     }
   }
 
-  // ── 习惯布置（HabitAssignPage）─────────────────────────────────────────
-
-  // 从后端加载已布置习惯，并与本地记录合并（本地优先保留描述/图标/周数等展示字段）
-  async function fetchHabits(childId?: string) {
-    const local = loadLocalAssignments()
-    try {
-      const res = await api.habits.getAll(childId)
-      const raw: any[] = res.habits ?? []
-      const merged: HabitAssignment[] = raw.map((h: any) => {
-        const id = String(h.pk_habit_sops ?? h.id ?? '')
-        const loc = local.find(x => x.id === id)
-        return {
-          id,
-          childId: loc?.childId ?? '',
-          parentId: loc?.parentId ?? '',
-          title: h.title ?? loc?.title ?? '',
-          description: loc?.description ?? (h as any).description ?? '',
-          icon: loc?.icon ?? (h as any).icon ?? '✅',
-          rewardPoints: h.reward_points ?? h.rewardPoints ?? loc?.rewardPoints ?? 5,
-          weekNumber: loc?.weekNumber ?? (h as any).week_number ?? (h as any).weekNumber ?? 1,
-          steps: (h.steps ?? loc?.steps ?? []).map((s: any) => ({
-            order: s.order,
-            instruction: s.instruction,
-            imageUrl: s.image_url ?? s.imageUrl,
-            gifUrl: s.gif_url ?? s.gifUrl,
-          })),
-          assignedAt: loc?.assignedAt ?? h.created_at ?? h.createdAt ?? new Date().toISOString(),
-          active: h.active ?? loc?.active ?? true,
-        }
-      })
-      // 本地有但后端未返回的记录（如离线创建尚未同步）也保留
-      const backendIds = new Set(merged.map(x => x.id))
-      for (const l of local) {
-        if (!backendIds.has(l.id)) merged.push(l)
-      }
-      habitAssignments.value = merged
-      saveLocalAssignments()
-    } catch { /* offline：保留本地数据 */ }
-  }
-
-  // 布置新习惯：乐观更新本地（并持久化）+ 同步后端（title/rewardPoints/steps 持久化）
-  function addHabitAssignment(data: Omit<HabitAssignment, 'id' | 'assignedAt'>) {
-    const habit: HabitAssignment = { ...data, id: `ha-${Date.now()}`, assignedAt: new Date().toISOString() }
-    habitAssignments.value.unshift(habit)
-    saveLocalAssignments()
-    const sop: HabitSOP = {
-      id: habit.id,
-      title: habit.title,
-      steps: habit.steps,
-      rewardPoints: habit.rewardPoints,
-      active: true,
-      createdAt: habit.assignedAt,
-    }
-    habits.value.unshift(sop)
-    api.habits.create({
-      title: habit.title,
-      rewardPoints: habit.rewardPoints,
-      steps: habit.steps.map(s => ({ instruction: s.instruction, order: s.order })),
-    }).then((res: any) => {
-      if (res?.habit?.pk_habit_sops) {
-        const backendId = String(res.habit.pk_habit_sops)
-        habit.id = backendId
-        sop.id = backendId
-        saveLocalAssignments()
-      }
-    }).catch(() => { /* offline：保持本地记录 */ })
-    return habit
-  }
-
-  // 停用习惯（软删除，复用 deleteHabit 同步后端与 habits 列表）
-  function deactivateHabit(id: string) {
-    const habit = habitAssignments.value.find(h => h.id === id)
-    if (habit) {
-      habit.active = false
-      saveLocalAssignments()
-    }
-    deleteHabit(id)
-  }
-
   return {
     todayTasks,
     habits,
-    habitAssignments,
     weeklyProgress,
-    activeHabits,
     fetchFromApi,
-    fetchHabits,
-    addHabitAssignment,
-    deactivateHabit,
     completeTask,
     setTodayTasks,
     resetTodayTasks,

@@ -90,6 +90,8 @@ export function normalizeSubTask(s: any): SubTaskItem {
     type: s.type ?? undefined,
     weekDay: s.week_day ?? s.weekDay,
     sortOrder: s.sort_order ?? s.sortOrder ?? 0,
+    isOptional: Boolean(s.is_optional ?? s.isOptional ?? false),
+    rewardPoints: s.reward_points ?? s.rewardPoints ?? undefined,
   }
 }
 
@@ -359,19 +361,23 @@ export const api = {
     getSubTaskLibrary: (childId?: string) =>
       request<any>(`/tasks/subtasks/library${childId ? `?child_id=${childId}` : ''}`),
     subtasks: {
-      add: (taskId: string, data: { title: string; type?: string; weekDay?: string; sortOrder?: number }) => {
+      add: (taskId: string, data: { title: string; type?: string; weekDay?: string; sortOrder?: number; isOptional?: boolean; rewardPoints?: number }) => {
         const params = new URLSearchParams({ title: data.title })
         if (data.type) params.set('type', data.type)
         if (data.weekDay) params.set('week_day', data.weekDay)
         if (data.sortOrder !== undefined) params.set('sort_order', String(data.sortOrder))
+        if (data.isOptional) params.set('is_optional', 'true')
+        if (data.rewardPoints !== undefined && data.rewardPoints !== null) params.set('reward_points', String(data.rewardPoints))
         return request<any>(`/tasks/${taskId}/subtasks?${params}`, { method: 'POST' })
       },
-      update: (taskId: string, subtaskId: string, data: { title?: string; type?: string; weekDay?: string; sortOrder?: number }) => {
+      update: (taskId: string, subtaskId: string, data: { title?: string; type?: string; weekDay?: string; sortOrder?: number; isOptional?: boolean; rewardPoints?: number }) => {
         const params = new URLSearchParams()
         if (data.title) params.set('title', data.title)
         if (data.type) params.set('type', data.type)
         if (data.weekDay) params.set('week_day', data.weekDay)
         if (data.sortOrder !== undefined) params.set('sort_order', String(data.sortOrder))
+        if (data.isOptional !== undefined) params.set('is_optional', String(data.isOptional))
+        if (data.rewardPoints !== undefined && data.rewardPoints !== null) params.set('reward_points', String(data.rewardPoints))
         return request<any>(`/tasks/${taskId}/subtasks/${subtaskId}?${params}`, { method: 'PUT' })
       },
       remove: (taskId: string, subtaskId: string) =>
@@ -483,8 +489,14 @@ export const api = {
     redeemApple: (count: number, reason: string, childId?: string) => {
       const params = new URLSearchParams({ count: String(count), reason })
       if (childId) params.set('child_id', childId)
-      return request<{ success: boolean; apples: number; redeemed: number }>(`/points/apples/redeem?${params}`, { method: 'POST' })
+      return request<{ success: boolean; submitted?: boolean; requestId?: number; apples: number; redeemed?: number; message?: string }>(`/points/apples/redeem?${params}`, { method: 'POST' })
     },
+    getAppleRedemptionRequests: (status?: 'pending' | 'approved' | 'rejected') =>
+      request<{ requests: any[] }>(`/points/apples/redemption-requests${status ? `?status=${status}` : ''}`),
+    approveAppleRedemption: (id: number) =>
+      request<{ success: boolean; childName: string; redeemed: number; apples: number }>(`/points/apples/redemption-requests/${id}/approve`, { method: 'POST' }),
+    rejectAppleRedemption: (id: number) =>
+      request<{ success: boolean; childName: string }>(`/points/apples/redemption-requests/${id}/reject`, { method: 'POST' }),
 
     // ── 待收集阳光 API ──
     getPendingSunlight: (childId?: string) =>
@@ -494,21 +506,44 @@ export const api = {
   },
 
   checkins: {
-    submit: (data: { checkDate: string; totalPoints?: number; habitStepCount?: number; taskCount?: number }) => {
+    submit: (data: {
+      checkDate: string
+      totalPoints?: number
+      habitStepCount?: number
+      taskCount?: number
+      requiredPoints?: number
+      optionalBonus?: number
+      allDoneBonus?: number
+      habitPoints?: number
+      completedTasks?: { title: string; icon?: string; points?: number }[]
+    }) => {
       const params = new URLSearchParams({ check_date: data.checkDate })
       if (data.totalPoints) params.set('total_points', String(data.totalPoints))
       if (data.habitStepCount) params.set('habit_step_count', String(data.habitStepCount))
       if (data.taskCount) params.set('task_count', String(data.taskCount))
+      if (data.requiredPoints) params.set('required_points', String(data.requiredPoints))
+      if (data.optionalBonus) params.set('optional_bonus', String(data.optionalBonus))
+      if (data.allDoneBonus) params.set('all_done_bonus', String(data.allDoneBonus))
+      if (data.habitPoints) params.set('habit_points', String(data.habitPoints))
+      if (data.completedTasks?.length) params.set('completed_tasks', JSON.stringify(data.completedTasks))
       return request<any>(`/checkins/?${params}`, { method: 'POST' })
     },
+    getMine: (limit = 60) =>
+      request<{ checkins: any[] }>(`/checkins/mine?limit=${limit}`),
     getPending: () =>
       request<{ pending: any[] }>('/checkins/pending'),
     getHistory: (limit = 50) =>
       request<{ history: any[] }>(`/checkins/history?limit=${limit}`),
     approve: (id: number) =>
       request<{ success: boolean; awarded: number }>(`/checkins/${id}/approve`, { method: 'POST' }),
-    reject: (id: number) =>
-      request<{ success: boolean }>(`/checkins/${id}/reject`, { method: 'POST' }),
+    reject: (id: number, reason?: string) => {
+      const params = new URLSearchParams()
+      if (reason) params.set('reason', reason)
+      const qs = params.toString()
+      return request<{ success: boolean }>(`/checkins/${id}/reject${qs ? `?${qs}` : ''}`, { method: 'POST' })
+    },
+    reopen: (id: number) =>
+      request<{ success: boolean }>(`/checkins/${id}/reopen`, { method: 'POST' }),
     getDetails: (id: number) =>
       request<{ checkin: any; completedTasks: any[]; pendingTasks: any[]; habits: any[] }>(`/checkins/${id}/details`),
   },

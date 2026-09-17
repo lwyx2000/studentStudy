@@ -31,6 +31,10 @@ export interface SubTaskItem {
   type?: TaskCategory
   weekDay?: 'weekday' | 'weekend' | string
   sortOrder: number
+  /** 可选子任务：不完成不影响打卡，完成后作为加分项 */
+  isOptional?: boolean
+  /** 子任务独立阳光值；未设置时必做默认继承主任务分值，可选⭐默认 +2 */
+  rewardPoints?: number
 }
 
 export interface TaskItem {
@@ -178,20 +182,6 @@ export interface SOPStep {
   instruction: string
   imageUrl?: string
   gifUrl?: string
-}
-
-export interface HabitAssignment {
-  id: string
-  childId: string
-  parentId: string
-  title: string
-  description: string
-  icon: string
-  rewardPoints: number
-  weekNumber: number
-  steps: SOPStep[]
-  assignedAt: string
-  active: boolean
 }
 
 export interface SunlightRecord {

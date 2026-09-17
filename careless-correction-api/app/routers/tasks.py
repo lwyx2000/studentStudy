@@ -16,6 +16,24 @@ from app.schemas import SubTaskOut, TaskOut
 router = APIRouter()
 
 
+# 与前端 matchesToday 保持一致的星期过滤逻辑
+_DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+
+
+def _matches_week_day(week_day: str | None, d: date) -> bool:
+    """主任务按 week_day 过滤（weekday/weekend/逗号分隔的星期名），空值表示每天。"""
+    if not week_day:
+        return True
+    is_weekday = 0 < d.weekday() + 1 < 7  # Monday=1..Friday=5
+    is_weekend = d.weekday() >= 5  # Saturday/Sunday
+    if week_day == 'weekday':
+        return is_weekday
+    if week_day == 'weekend':
+        return is_weekend
+    day_name = _DAY_NAMES[(d.weekday() + 1) % 7]
+    return day_name in [s.strip().lower() for s in week_day.split(',')]
+
+
 def resolve_target_user(current_user: User, child_id: int | None, db: Session) -> User:
     """家长可通过 child_id 操作孩子数据，否则操作自己的数据"""
     if child_id is None:
@@ -64,6 +82,7 @@ def get_today_tasks(
     target = resolve_target_user(current_user, child_id, db)
     # 自动重置每日任务
     _reset_daily_tasks(target, db)
+    today = date.today()
     tasks = (
         db.query(Task)
         .options(selectinload(Task.sub_tasks))
@@ -75,6 +94,8 @@ def get_today_tasks(
         .order_by(Task.type)
         .all()
     )
+    # 主任务按 week_day 过滤（周末任务不在工作日出现等）
+    tasks = [t for t in tasks if _matches_week_day(t.week_day, today)]
     return {'tasks': [TaskOut.model_validate(t) for t in tasks]}
 
 
@@ -281,12 +302,15 @@ def get_subtask_library(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """获取所有子任务库（用于复用）"""
+    """获取所有子任务库（用于复用，排除已删除任务下的子任务）"""
     target = resolve_target_user(current_user, child_id, db)
     subtasks = (
         db.query(SubTask)
         .join(Task, SubTask.fk_tasks == Task.pk_tasks)
-        .filter(Task.fk_users == target.pk_users)
+        .filter(
+            Task.fk_users == target.pk_users,
+            Task.active == True,
+        )
         .order_by(SubTask.created_at.desc())
         .all()
     )
@@ -297,6 +321,8 @@ def get_subtask_library(
             'type': s.type,
             'week_day': s.week_day,
             'sort_order': s.sort_order,
+            'is_optional': s.is_optional,
+            'reward_points': s.reward_points,
             'created_at': s.created_at,
             'task_title': db.query(Task.title).filter(Task.pk_tasks == s.fk_tasks).scalar(),
         }
@@ -311,10 +337,13 @@ def add_subtask(
     type: str | None = None,
     week_day: str | None = None,
     sort_order: int = 0,
+    is_optional: bool = False,
+    reward_points: int | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """给任务添加子任务（type 默认继承主任务类别，week_day: weekday/weekend 区分平时和周末）"""
+    """给任务添加子任务（type 默认继承主任务类别，week_day: weekday/weekend 区分平时和周末；
+    reward_points 为空表示默认：必做继承主任务分值，可选⭐默认 +2）"""
     task = db.query(Task).filter(Task.pk_tasks == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail='任务不存在')
@@ -328,6 +357,8 @@ def add_subtask(
         type=type or task.type,
         week_day=week_day,
         sort_order=sort_order,
+        is_optional=is_optional,
+        reward_points=reward_points,
     )
     db.add(subtask)
     db.commit()
@@ -343,6 +374,8 @@ def update_subtask(
     type: str | None = None,
     week_day: str | None = None,
     sort_order: int | None = None,
+    is_optional: bool | None = None,
+    reward_points: int | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -366,6 +399,10 @@ def update_subtask(
         subtask.week_day = week_day
     if sort_order is not None:
         subtask.sort_order = sort_order
+    if is_optional is not None:
+        subtask.is_optional = is_optional
+    if reward_points is not None:
+        subtask.reward_points = reward_points
     db.commit()
     db.refresh(subtask)
     return subtask

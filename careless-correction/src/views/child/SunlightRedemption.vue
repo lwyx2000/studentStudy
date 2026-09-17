@@ -14,8 +14,8 @@ const redemptionHistory = computed(() =>
     <section class="page-hero">
       <div class="hero-card">
         <span class="eyebrow">☀️ 阳光兑换屋</span>
-        <h1>已兑换的物品</h1>
-        <p class="lead">完成每日任务赚取阳光值，兑换记录会在这里展示。</p>
+        <h1>阳光兑换</h1>
+        <p class="lead">完成每日任务赚取阳光值，兑换记录会在这里展示。实际兑换由家长操作。</p>
       </div>
       <div class="panel" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
         <span style="font-size:48px">☀️</span>

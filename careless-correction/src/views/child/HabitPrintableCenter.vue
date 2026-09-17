@@ -57,6 +57,11 @@ const allTasks = computed(() => {
   return merged
 })
 
+// ── Optional sub-task bonus: 可选子任务不完成不影响审核，完成则加分 ──
+const OPTIONAL_BONUS_POINTS = 2
+// ── 全部完成奖励：当天所有必做小任务都完成后额外奖励 ──
+const ALL_DONE_BONUS_POINTS = 10
+
 // ── Build checklist items from subtasks ──
 interface ChecklistItem {
   id: string
@@ -68,6 +73,9 @@ interface ChecklistItem {
   parentTaskId: string
   parentTaskTitle: string
   rewardPoints: number
+  isOptional?: boolean
+  /** 子任务独立阳光值；未设置时必做默认继承主任务分值，可选⭐默认 +2 */
+  subRewardPoints?: number
 }
 
 const checklistItems = ref<ChecklistItem[]>([])
@@ -75,6 +83,21 @@ const checklistItems = ref<ChecklistItem[]>([])
 async function loadChecklistItems() {
   const tasks = allTasks.value
   const items: ChecklistItem[] = []
+
+  // 构建习惯计分项（按今天匹配的习惯）
+  const hItems: HabitChecklistItem[] = []
+  for (const h of taskStore.habits) {
+    for (const step of h.steps ?? []) {
+      hItems.push({
+        habitId: h.id,
+        habitTitle: h.title,
+        stepOrder: step.order,
+        instruction: step.instruction,
+        pointsPerStep: h.rewardPoints ?? 0,
+      })
+    }
+  }
+  habitItems.value = hItems
 
   await Promise.allSettled(tasks.map(async (task) => {
     let subTasks = task.subTasks || []
@@ -109,6 +132,8 @@ async function loadChecklistItems() {
         parentTaskId: task.id,
         parentTaskTitle: task.title,
         rewardPoints: task.rewardPoints,
+        isOptional: sub.isOptional,
+        subRewardPoints: sub.rewardPoints,
       })
     }
   }))
@@ -122,10 +147,42 @@ const submitted = ref<boolean>(localStorage.getItem(submittedKey) === 'true')
 const submitting = ref(false)
 const submitMessage = ref('')
 
+// ── 打卡审批状态（从后端拉取，展示驳回原因/通过横幅）──
+interface CheckinStatusInfo {
+  id: number
+  status: 'pending' | 'approved' | 'rejected'
+  rejectReason: string | null
+}
+const checkinStatus = ref<CheckinStatusInfo | null>(null)
+
+async function loadCheckinStatus() {
+  if (!/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(activeDate)) return
+  try {
+    const res = await api.checkins.getMine(60)
+    const normalized = activeDate.replace(/\//g, '-')
+    const match = (res.checkins ?? []).find((c: any) => {
+      const d = String(c.checkDate ?? '').replace(/\//g, '-')
+      const parts = d.split('-')
+      // 归一化比较：补零到两位
+      if (parts.length === 3) {
+        const key = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`
+        return key === normalized
+      }
+      return d === normalized
+    })
+    if (match) {
+      checkinStatus.value = {
+        id: match.id,
+        status: match.status,
+        rejectReason: match.rejectReason ?? null,
+      }
+    }
+  } catch { /* offline */ }
+}
+
 // ── Toggle handlers ──
-// For today: locked after submit. For past dates (editing): always editable.
+// 允许今日多次提交：提交后仍可勾选新任务再次提交
 function toggleTaskItem(item: ChecklistItem) {
-  if (submitted.value && isToday) return
   const key = `task-${item.id}`
   checkState.value[key] = !checkState.value[key]
   saveCheckState()
@@ -139,11 +196,33 @@ function isTaskItemChecked(itemId: string): boolean {
 const checkedTaskItems = computed(() =>
   checklistItems.value.filter(item => isTaskItemChecked(item.id))
 )
+// 必做项（可选子任务不算必做）
+const requiredItems = computed(() => checklistItems.value.filter(item => !item.isOptional))
+const checkedRequiredItems = computed(() => requiredItems.value.filter(item => isTaskItemChecked(item.id)))
+// 已完成的可选子任务（加分项）
+const checkedOptionalItems = computed(() =>
+  checklistItems.value.filter(item => item.isOptional && isTaskItemChecked(item.id))
+)
+const optionalBonusPoints = computed(() => checkedOptionalItems.value.length * OPTIONAL_BONUS_POINTS)
+
+/** 小任务分值：家长单独设置的优先，否则可选⭐默认 +2，必做默认继承主任务分值 */
+function itemPoints(item: ChecklistItem): number {
+  if (item.subRewardPoints !== undefined && item.subRewardPoints !== null) return item.subRewardPoints
+  return item.isOptional ? OPTIONAL_BONUS_POINTS : item.rewardPoints
+}
+/** 已勾选必做小任务的总分（每项独立计分） */
+const checkedRequiredPoints = computed(() =>
+  checkedRequiredItems.value.reduce((sum, item) => sum + itemPoints(item), 0)
+)
+/** 是否所有必做小任务都已完成（触发全部完成奖励） */
+const allRequiredDone = computed(() =>
+  requiredItems.value.length > 0 && checkedRequiredItems.value.length === requiredItems.value.length
+)
 
 async function submitChecklist() {
   if (submitted.value || submitting.value) return
-  if (completedCount.value === 0) {
-    submitMessage.value = '请先勾选至少一项再提交'
+  if (checkedRequiredItems.value.length === 0) {
+    submitMessage.value = '请先勾选至少一项必做任务再提交（可选 ⭐ 项不完成也没关系）'
     return
   }
   submitting.value = true
@@ -152,13 +231,28 @@ async function submitChecklist() {
   let totalPoints = 0
   const completedTaskTitles: string[] = []
 
+  // 标记主任务完成（同步到后端）并统计完成任务数，分数改由子任务独立计分
+  const completedParentTasks = new Set<string>()
   for (const item of checkedTaskItems.value) {
-    const points = taskStore.completeTask(item.parentTaskId)
-    if (points > 0) {
-      totalPoints += points
-      completedTaskTitles.push(item.parentTaskTitle)
-    }
+    if (completedParentTasks.has(item.parentTaskId)) continue
+    completedParentTasks.add(item.parentTaskId)
+    taskStore.completeTask(item.parentTaskId)
+    completedTaskTitles.push(item.parentTaskTitle)
   }
+
+  // 每个必做小任务按各自分值独立计分
+  totalPoints += checkedRequiredPoints.value
+
+  // 可选子任务加分项
+  totalPoints += optionalBonusPoints.value
+
+  // 全部完成奖励：所有必做小任务都完成时额外 +10
+  if (allRequiredDone.value) {
+    totalPoints += ALL_DONE_BONUS_POINTS
+  }
+
+  // 习惯步骤计分（勾选的习惯步骤 × 各习惯分值）
+  totalPoints += habitPoints.value
 
   // Record growth data
   const done = taskStore.todayTasks.filter(t => t.status === 'completed').length
@@ -174,10 +268,24 @@ async function submitChecklist() {
     api.checkins.submit({
       checkDate: activeDate,
       totalPoints,
-      habitStepCount: 0,
+      habitStepCount: checkedHabitSteps.value.length,
       taskCount: completedTaskTitles.length,
+      requiredPoints: checkedRequiredPoints.value,
+      optionalBonus: optionalBonusPoints.value,
+      allDoneBonus: allRequiredDone.value ? ALL_DONE_BONUS_POINTS : 0,
+      habitPoints: habitPoints.value,
+      completedTasks: checkedTaskItems.value.map(item => ({
+        title: item.title,
+        icon: item.icon,
+        points: itemPoints(item),
+      })),
     }).then(() => {
-      submitMessage.value = `已提交打卡，等待家长审批 🕐 审批通过后将获得 ${totalPoints} 阳光值`
+      const extras: string[] = []
+      if (allRequiredDone.value) extras.push(`全部完成奖励 +${ALL_DONE_BONUS_POINTS}`)
+      if (optionalBonusPoints.value > 0) extras.push(`可选 ⭐ 加分 +${optionalBonusPoints.value}`)
+      if (habitPoints.value > 0) extras.push(`习惯打卡 +${habitPoints.value}`)
+      const extraText = extras.length ? `（含 ${extras.join(' · ')}）` : ''
+      submitMessage.value = `已提交打卡，等待家长审批 🕐 ${extraText}通过后将获得 ${totalPoints} 阳光值`
     }).catch(() => {
       submitMessage.value = `打卡已记录！等待家长审批后获得 ${totalPoints} 阳光值 🕐`
     })
@@ -186,14 +294,34 @@ async function submitChecklist() {
   }
 }
 
-// ── Progress ──
-const totalCount = computed(() => checklistItems.value.length)
-const completedCount = computed(() =>
-  checklistItems.value.filter(item => isTaskItemChecked(item.id)).length
+// ── 习惯计分：勾选完成的习惯步骤按各习惯分值计分 ──
+interface HabitChecklistItem {
+  habitId: string
+  habitTitle: string
+  stepOrder: number
+  instruction: string
+  pointsPerStep: number
+}
+const habitItems = ref<HabitChecklistItem[]>([])
+const checkedHabitSteps = computed(() =>
+  habitItems.value.filter(h => !!checkState.value[`habit-${h.habitId}-${h.stepOrder}`])
 )
+const habitPoints = computed(() =>
+  checkedHabitSteps.value.reduce((sum, h) => sum + h.pointsPerStep, 0)
+)
+
+function toggleHabitItem(h: HabitChecklistItem) {
+  const key = `habit-${h.habitId}-${h.stepOrder}`
+  checkState.value[key] = !checkState.value[key]
+  saveCheckState()
+}
+
+// ── Progress ──
+const totalCount = computed(() => requiredItems.value.length)
+const completedCount = computed(() => checkedRequiredItems.value.length)
 const totalPossiblePoints = computed(() =>
   checklistItems.value.reduce((sum, item) =>
-    sum + (isTaskItemChecked(item.id) ? item.rewardPoints : 0), 0
+    sum + (isTaskItemChecked(item.id) ? itemPoints(item) : 0), 0
   )
 )
 const progressPercent = computed(() =>
@@ -220,21 +348,23 @@ const taskGroups = computed<TaskGroup[]>(() => {
   }
   return Array.from(map.entries()).map(([taskId, items]) => {
     const first = items[0]
-    const checkedCount = items.filter(i => isTaskItemChecked(i.id)).length
+    // 必做项决定任务完成状态；可选 ⭐ 项只算加分
+    const required = items.filter(i => !i.isOptional)
+    const checkedRequiredCount = required.filter(i => isTaskItemChecked(i.id)).length
+    const anyChecked = items.some(i => isTaskItemChecked(i.id))
     return {
       taskId,
       taskTitle: first.parentTaskTitle,
       taskIcon: first.icon,
       items,
-      allChecked: checkedCount === items.length,
-      someChecked: checkedCount > 0 && checkedCount < items.length,
+      allChecked: required.length > 0 && checkedRequiredCount === required.length,
+      someChecked: checkedRequiredCount < required.length && anyChecked,
       taskReward: first.rewardPoints,
     }
   })
 })
 
 function toggleTaskGroup(group: TaskGroup) {
-  if (submitted.value && isToday) return
   const newState = !group.allChecked
   for (const item of group.items) {
     const key = `task-${item.id}`
@@ -272,6 +402,7 @@ onMounted(async () => {
   await Promise.allSettled([
     loadChecklistItems(),
     userStore.fetchFromApi(),
+    loadCheckinStatus(),
   ])
   loading.value = false
 })
@@ -299,11 +430,30 @@ onMounted(async () => {
           ☀️ {{ userStore.sunlightPoints }} 阳光值
           <span class="muted" style="font-size:13px;font-weight:700">
             · 已勾选可获 +{{ totalPossiblePoints || 0 }} 阳光值
+            <template v-if="checkedOptionalItems.length">
+              · ⭐ 加分 {{ checkedOptionalItems.length }} 项 +{{ optionalBonusPoints }}
+            </template>
+            <template v-if="allRequiredDone">
+              · 🎉 全部完成 +{{ ALL_DONE_BONUS_POINTS }}
+            </template>
           </span>
+        </p>
+        <p class="muted" style="font-size:12px;margin-top:2px">
+          💡 完成每个小任务获得各自阳光值；<template v-if="checklistItems.some(i => i.isOptional)">带 ⭐ 的是可选加分项，不完成不影响审核；</template>所有必做小任务全部完成，额外奖励 +{{ ALL_DONE_BONUS_POINTS }} 阳光值
         </p>
         <p v-if="submitMessage && submitted" class="lead" style="font-size:14px;color:var(--primary);margin-top:4px">
           {{ submitMessage }}
         </p>
+        <!-- 审批状态横幅 -->
+        <div v-if="checkinStatus?.status === 'approved'" class="status-banner status-approved-banner">
+          ✅ 家长已通过 {{ activeDate }} 的打卡，去阳光树收集阳光吧！
+        </div>
+        <div v-else-if="checkinStatus?.status === 'rejected'" class="status-banner status-rejected-banner">
+          ❌ {{ activeDate }} 的打卡被驳回<template v-if="checkinStatus.rejectReason">：{{ checkinStatus.rejectReason }}</template><template v-else>，可以补充完成后重新提交打卡</template>
+        </div>
+        <div v-else-if="checkinStatus?.status === 'pending'" class="status-banner status-pending-banner">
+          🕐 {{ activeDate }} 的打卡等待家长审批中
+        </div>
       </div>
     </section>
 
@@ -361,6 +511,12 @@ onMounted(async () => {
                     <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
                       <span v-if="item.type" class="ptr-sub-badge">{{ categoryOptions.find(c => c.value === item.type)?.label || item.type }}</span>
                       <span v-if="item.weekDay" class="ptr-sub-badge ptr-sub-day">{{ weekDayToLabel(item.weekDay) }}</span>
+                      <span class="ptr-sub-badge ptr-sub-points">☀️ +{{ itemPoints(item) }}</span>
+                      <span
+                        v-if="item.isOptional"
+                        class="ptr-sub-badge"
+                        style="background:#fff8d9;color:#8a6d3b;font-weight:800"
+                      >⭐ 可选</span>
                     </div>
                   </div>
                   <span class="ptr-check touch-check" :class="{ checked: isTaskItemChecked(item.id) }">
@@ -371,6 +527,31 @@ onMounted(async () => {
             </div>
           </div>
           <p v-else class="muted">暂无任务子项，请先在家长端「任务管理」中添加子任务。</p>
+        </div>
+
+        <!-- 习惯打卡计分区 -->
+        <div v-if="habitItems.length" class="print-section">
+          <h3>🌱 习惯打卡（每完成一步得阳光值）</h3>
+          <div class="task-subitems">
+            <div
+              v-for="h in habitItems"
+              :key="`${h.habitId}-${h.stepOrder}`"
+              class="ptr-row clickable"
+              :class="{ 'row-checked': !!checkState[`habit-${h.habitId}-${h.stepOrder}`] }"
+              @click="toggleHabitItem(h)"
+            >
+              <div class="ptr-info">
+                <strong>{{ h.habitTitle }} · 第 {{ h.stepOrder }} 步</strong>
+                <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+                  <span class="ptr-sub-badge">{{ h.instruction }}</span>
+                  <span class="ptr-sub-badge ptr-sub-points">☀️ +{{ h.pointsPerStep }}</span>
+                </div>
+              </div>
+              <span class="ptr-check touch-check" :class="{ checked: !!checkState[`habit-${h.habitId}-${h.stepOrder}`] }">
+                {{ checkState[`habit-${h.habitId}-${h.stepOrder}`] ? '✓' : '□' }}
+              </span>
+            </div>
+          </div>
         </div>
 
         <!-- Submit Section (only for today) -->
@@ -384,7 +565,7 @@ onMounted(async () => {
             :disabled="submitting || completedCount === 0"
             @click="submitChecklist"
           >
-            {{ submitting ? '⏳ 提交中...' : `✅ 提交打卡（${completedCount}/${totalCount}）` }}
+            {{ submitting ? '⏳ 提交中...' : `✅ 提交打卡（必做 ${checkedRequiredItems.length}/${totalCount}${checkedOptionalItems.length ? ` · ⭐ ${checkedOptionalItems.length}` : ''}${checkedHabitSteps.length ? ` · 🌱 ${checkedHabitSteps.length} 步` : ''}）` }}
           </button>
           <div v-else class="submitted-badge">
             <span>✅ 今日已打卡</span>
@@ -394,12 +575,12 @@ onMounted(async () => {
 
         <!-- Edit mode notice (for past dates) -->
         <div v-else class="edit-mode-notice">
-          <span>📋 正在编辑 {{ activeDate }} 的打卡记录</span>
-          <button class="btn ghost" @click="backToDashboard">完成编辑</button>
+          <span>📋 正在回看 {{ activeDate }} 的打卡清单（勾选状态仅保存在本设备，提交记录以家长审批结果为准）</span>
+          <button class="btn ghost" @click="backToDashboard">返回历史</button>
         </div>
 
         <div class="print-footer">
-          <p>{{ isToday ? '每天完成后打 ✓，点击提交即可同步打卡记录' : '修改会自动保存到本地记录' }}</p>
+          <p>{{ isToday ? '每天完成后打 ✓，点击提交即可同步打卡记录' : '此页为历史记录回看，勾选不会修改已提交的打卡' }}</p>
         </div>
       </div>
     </template>
@@ -590,6 +771,10 @@ onMounted(async () => {
   background: #fff3e0;
   color: #e65100;
 }
+.ptr-sub-points {
+  background: #fff9e0;
+  color: #a67c00;
+}
 
 /* ── Interactive styles ── */
 .clickable {
@@ -731,6 +916,30 @@ onMounted(async () => {
 .reset-btn {
   padding: 8px 16px;
   font-size: 14px;
+}
+
+/* ── 审批状态横幅 ── */
+.status-banner {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.status-approved-banner {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+}
+.status-rejected-banner {
+  background: #ffebee;
+  color: #c62828;
+  border: 1px solid #ef9a9a;
+}
+.status-pending-banner {
+  background: #fff8e1;
+  color: #b28704;
+  border: 1px solid #ffe082;
 }
 
 @media (max-width: 700px) {

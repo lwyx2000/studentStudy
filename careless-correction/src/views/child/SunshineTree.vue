@@ -11,6 +11,7 @@ import {
   type Ticker,
 } from 'pixi.js'
 import { useUserStore } from '../../stores'
+import { api } from '../../utils/api'
 import { Typewriter, Modal } from 'animal-island-vue'
 
 // ── Image assets ──
@@ -149,26 +150,72 @@ function clickTree() {
   }
 }
 
-// ── Apple redemption ──
+// ── Apple redemption（提交申请，家长审批后扣苹果）──
 const showRedeemModal = ref(false)
 const redeemCount = ref(1)
 const redeemReason = ref('')
 const redeemSuccess = ref('')
+const redeemError = ref('')
+const redeemSubmitting = ref(false)
+
+interface AppleRedemptionRequestInfo {
+  id: number
+  count: number
+  reason: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: string | null
+}
+const redemptionRequests = ref<AppleRedemptionRequestInfo[]>([])
+const pendingRedemption = computed(() => redemptionRequests.value.find(r => r.status === 'pending'))
+
+async function loadRedemptionRequests() {
+  try {
+    const res = await api.points.getAppleRedemptionRequests()
+    redemptionRequests.value = (res.requests ?? []).map((r: any) => ({
+      id: r.id,
+      count: r.count,
+      reason: r.reason ?? '',
+      status: r.status,
+      createdAt: r.createdAt ?? null,
+    }))
+  } catch { /* offline */ }
+}
 
 function openRedeemModal() {
   redeemCount.value = 1
   redeemReason.value = ''
   redeemSuccess.value = ''
+  redeemError.value = ''
   showRedeemModal.value = true
 }
 
-function confirmRedeem() {
+async function confirmRedeem() {
+  if (redeemSubmitting.value) return
   if (redeemCount.value <= 0 || redeemCount.value > userStore.apples) return
-  const ok = userStore.redeemApple(redeemCount.value, redeemReason.value || `和爸爸妈妈兑换 ${redeemCount.value} 元`)
-  if (ok) {
-    redeemSuccess.value = `成功兑换 ${redeemCount.value} 个苹果（= ${redeemCount.value} 元）`
-    setTimeout(() => { showRedeemModal.value = false }, 1800)
+  redeemSubmitting.value = true
+  redeemError.value = ''
+  try {
+    const result = await userStore.redeemApple(redeemCount.value, redeemReason.value || `和爸爸妈妈兑换 ${redeemCount.value} 元`)
+    if (result === 'busy') {
+      redeemError.value = '正在提交，请稍候'
+      return
+    }
+    if (!result) {
+      redeemError.value = '苹果数量不足或数量无效'
+      return
+    }
+    redeemSuccess.value = '📨 兑换申请已提交，等爸爸妈妈审批通过后就能兑换啦！'
+    setTimeout(() => { showRedeemModal.value = false }, 2200)
+    loadRedemptionRequests()
+  } catch (e: any) {
+    redeemError.value = e?.message || '提交失败，请重试'
+  } finally {
+    redeemSubmitting.value = false
   }
+}
+
+function statusLabel(s: string) {
+  return s === 'pending' ? '🕐 待审批' : s === 'approved' ? '✅ 已通过' : '❌ 已驳回'
 }
 
 // ── Computed ──
@@ -807,6 +854,7 @@ onMounted(() => {
   // 进入页面时重新拉取最新阳光/苹果余额，避免显示陈旧数据
   // 不 await：场景先用缓存值立即渲染，数据返回后由下方 watcher 实时刷新
   userStore.fetchFromApi()
+  loadRedemptionRequests()
   initScene()
 })
 
@@ -919,6 +967,20 @@ onUnmounted(() => {
       </section>
     </div>
 
+    <!-- 兑换申请状态 -->
+    <section v-if="redemptionRequests.length" class="panel redemption-panel">
+      <h3>📨 我的兑换申请</h3>
+      <div class="redemption-list">
+        <div v-for="r in redemptionRequests.slice(0, 5)" :key="r.id" class="redemption-row" :class="r.status">
+          <div style="flex:1;min-width:0">
+            <strong>🍎 {{ r.count }} 个苹果（= {{ r.count }} 元）</strong>
+            <p class="muted" style="font-size:12px;margin:2px 0 0">{{ r.reason }}</p>
+          </div>
+          <span class="redemption-status" :class="r.status">{{ statusLabel(r.status) }}</span>
+        </div>
+      </div>
+    </section>
+
     <!-- Tips -->
     <section class="panel tips-panel">
       <h3>💡 玩法说明</h3>
@@ -937,7 +999,7 @@ onUnmounted(() => {
         </div>
         <div class="tip-item">
           <span class="tip-icon">💰</span>
-          <p>1 个苹果 = 1 元钱，找爸爸妈妈兑换奖励</p>
+          <p>1 个苹果 = 1 元钱，提交兑换申请，爸爸妈妈审批通过后即可兑换</p>
         </div>
       </div>
     </section>
@@ -962,6 +1024,10 @@ onUnmounted(() => {
           <span class="muted">个苹果 = {{ userStore.apples }} 元</span>
         </div>
 
+        <div v-if="pendingRedemption" class="pending-request-tip">
+          🕐 已有申请：{{ pendingRedemption.count }} 个苹果（{{ pendingRedemption.reason }}）等待家长审批
+        </div>
+
         <div class="modal-field">
           <label>兑换数量</label>
           <div class="count-stepper">
@@ -977,16 +1043,18 @@ onUnmounted(() => {
         </div>
 
         <div class="modal-summary">
-          将使用 <strong>{{ redeemCount }}</strong> 个苹果（= <strong>{{ redeemCount }}</strong> 元）
+          将申请用 <strong>{{ redeemCount }}</strong> 个苹果（= <strong>{{ redeemCount }}</strong> 元），爸爸妈妈审批通过后扣除
         </div>
+
+        <p v-if="redeemError" class="redeem-error">{{ redeemError }}</p>
 
         <button
           class="btn"
           style="width:100%"
-          :disabled="redeemCount <= 0 || redeemCount > userStore.apples"
+          :disabled="redeemCount <= 0 || redeemCount > userStore.apples || redeemSubmitting"
           @click="confirmRedeem"
         >
-          确认兑换
+          {{ redeemSubmitting ? '⏳ 提交中...' : '📨 提交兑换申请' }}
         </button>
       </template>
     </Modal>
@@ -1058,6 +1126,50 @@ onUnmounted(() => {
   opacity: 0;
   transform: translateX(-50%) translateY(10px);
 }
+
+/* ── 兑换申请 ── */
+.pending-request-tip {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  color: #b28704;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.redeem-error {
+  color: #c62828;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 4px 0 0;
+}
+.redemption-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.redemption-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.redemption-row.rejected {
+  opacity: .7;
+}
+.redemption-status {
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.redemption-status.pending { color: #b28704; }
+.redemption-status.approved { color: #2e7d32; }
+.redemption-status.rejected { color: #c62828; }
 
 /* ── Modal inner styles (animal-island-vue Modal) ── */
 .modal-balance {

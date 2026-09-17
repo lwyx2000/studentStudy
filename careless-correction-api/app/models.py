@@ -106,6 +106,9 @@ class SubTask(Base):
     type: Mapped[str] = mapped_column(String(20), nullable=False)
     week_day: Mapped[str | None] = mapped_column(String(50))
     sort_order: Mapped[int] = mapped_column(SmallInteger, default=0)
+    is_optional: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 子任务独立阳光值；NULL=默认（必做继承主任务分值，可选⭐默认+2）
+    reward_points: Mapped[int | None] = mapped_column(SmallInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     task = relationship('Task', backref='sub_tasks')
@@ -212,6 +215,15 @@ class CheckIn(Base):
     total_points: Mapped[int] = mapped_column(Integer, default=0)
     habit_step_count: Mapped[int] = mapped_column(Integer, default=0)
     task_count: Mapped[int] = mapped_column(Integer, default=0)
+    # 阳光值构成明细：必做小任务分 / 可选⭐加分 / 全部完成奖励
+    required_points: Mapped[int] = mapped_column(Integer, default=0)
+    optional_bonus: Mapped[int] = mapped_column(Integer, default=0)
+    all_done_bonus: Mapped[int] = mapped_column(Integer, default=0)
+    habit_points: Mapped[int] = mapped_column(Integer, default=0)
+    # 驳回原因（家长驳回时填写，孩子端可见）
+    reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 当日完成任务快照 JSON（[{title, icon, points}]），任务每日重置后详情仍可回看
+    completed_tasks_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default='pending')
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -397,6 +409,21 @@ class AppleHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     user = relationship('User', backref='apple_history')
+
+
+class AppleRedemptionRequest(Base):
+    """苹果兑换申请：孩子提交 → 家长审批通过后扣苹果（苹果=真实金钱，需家长确认）。"""
+    __tablename__ = 't_apple_redemption_requests'
+
+    pk_apple_redemption_requests: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fk_users: Mapped[int] = mapped_column(Integer, ForeignKey('t_users.pk_users'), nullable=False)
+    count: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default='pending')  # pending / approved / rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user = relationship('User', backref='apple_redemption_requests')
 
 
 class PendingSunlight(Base):

@@ -5,7 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import AppleHistory, PendingSunlight, RewardItem, SunlightHistory, User
+from app.models import (
+    AppleHistory, AppleRedemptionRequest, PendingSunlight, RewardItem,
+    SunlightHistory, User,
+)
 from app.routers.badges import auto_unlock_badges
 
 router = APIRouter()
@@ -264,27 +267,153 @@ def redeem_apple(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """兑换苹果（1 苹果 = 1 元）"""
+    """兑换苹果（1 苹果 = 1 元）。
+
+    孩子调用时只创建申请，等待家长审批；家长调用（带 child_id）可直接代为兑换。
+    """
     if count <= 0:
         raise HTTPException(status_code=400, detail='兑换数量必须大于 0')
     target = resolve_target(current_user, child_id, db)
     if target.apples < count:
         raise HTTPException(status_code=400, detail='苹果数量不足')
-    target.apples -= count
-    # 苹果变动记录
-    apple_history = AppleHistory(
+
+    if current_user.role == 'parent' and child_id is not None:
+        # 家长代兑：直接扣减（保持原有行为，供家长管理页使用）
+        target.apples -= count
+        apple_history = AppleHistory(
+            fk_users=target.pk_users,
+            amount=-count,
+            reason=reason or f'兑换 {count} 元',
+            type='redeem',
+        )
+        db.add(apple_history)
+        db.commit()
+        return {
+            'success': True,
+            'apples': target.apples,
+            'redeemed': count,
+        }
+
+    # 孩子提交：只创建申请，不扣减，待家长审批
+    # 防重复：同孩子已有 pending 申请时拒绝重复提交
+    existing_pending = db.query(AppleRedemptionRequest).filter(
+        AppleRedemptionRequest.fk_users == target.pk_users,
+        AppleRedemptionRequest.status == 'pending',
+    ).first()
+    if existing_pending:
+        raise HTTPException(status_code=400, detail='已有待审批的兑换申请，请等待家长处理')
+    req = AppleRedemptionRequest(
         fk_users=target.pk_users,
-        amount=-count,
-        reason=reason or f'兑换 {count} 元',
-        type='redeem',
+        count=count,
+        reason=(reason or f'兑换 {count} 元')[:200],
+        status='pending',
     )
-    db.add(apple_history)
+    db.add(req)
     db.commit()
+    db.refresh(req)
     return {
         'success': True,
+        'submitted': True,
+        'requestId': req.pk_apple_redemption_requests,
         'apples': target.apples,
-        'redeemed': count,
+        'message': '兑换申请已提交，等待家长审批',
     }
+
+
+@router.get('/apples/redemption-requests')
+def get_apple_redemption_requests(
+    status: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取苹果兑换申请列表：家长看自己孩子的，孩子看自己的。"""
+    if current_user.role == 'parent':
+        query = (
+            db.query(AppleRedemptionRequest)
+            .join(User, AppleRedemptionRequest.fk_users == User.pk_users)
+            .filter(User.fk_users_parent == current_user.pk_users)
+        )
+    else:
+        query = db.query(AppleRedemptionRequest).filter(
+            AppleRedemptionRequest.fk_users == current_user.pk_users
+        )
+    if status in ('pending', 'approved', 'rejected'):
+        query = query.filter(AppleRedemptionRequest.status == status)
+    records = query.order_by(AppleRedemptionRequest.pk_apple_redemption_requests.desc()).limit(50).all()
+    result = []
+    for r in records:
+        child = db.query(User).filter(User.pk_users == r.fk_users).first()
+        result.append({
+            'id': r.pk_apple_redemption_requests,
+            'childId': r.fk_users,
+            'childName': child.name if child else '未知',
+            'count': r.count,
+            'reason': r.reason,
+            'status': r.status,
+            'createdAt': r.created_at.isoformat() if r.created_at else None,
+            'approvedAt': r.approved_at.isoformat() if r.approved_at else None,
+        })
+    return {'requests': result}
+
+
+@router.post('/apples/redemption-requests/{request_id}/approve')
+def approve_apple_redemption(
+    request_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """家长审批通过苹果兑换申请：扣减苹果并记录。"""
+    if current_user.role != 'parent':
+        raise HTTPException(status_code=403, detail='只有家长可以审批兑换申请')
+    req = db.query(AppleRedemptionRequest).filter(
+        AppleRedemptionRequest.pk_apple_redemption_requests == request_id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail='兑换申请不存在')
+    child = db.query(User).filter(User.pk_users == req.fk_users).first()
+    if not child or child.fk_users_parent != current_user.pk_users:
+        raise HTTPException(status_code=403, detail='无权审批该申请')
+    if req.status != 'pending':
+        raise HTTPException(status_code=400, detail='该申请已处理')
+    if child.apples < req.count:
+        req.status = 'rejected'
+        db.commit()
+        raise HTTPException(status_code=400, detail='孩子苹果数量不足，申请已自动驳回')
+    child.apples -= req.count
+    req.status = 'approved'
+    req.approved_at = datetime.now()
+    db.add(AppleHistory(
+        fk_users=child.pk_users,
+        amount=-req.count,
+        reason=req.reason or f'兑换 {req.count} 元',
+        type='redeem',
+    ))
+    db.commit()
+    return {'success': True, 'childName': child.name, 'redeemed': req.count, 'apples': child.apples}
+
+
+@router.post('/apples/redemption-requests/{request_id}/reject')
+def reject_apple_redemption(
+    request_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """家长驳回苹果兑换申请。"""
+    if current_user.role != 'parent':
+        raise HTTPException(status_code=403, detail='只有家长可以审批兑换申请')
+    req = db.query(AppleRedemptionRequest).filter(
+        AppleRedemptionRequest.pk_apple_redemption_requests == request_id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail='兑换申请不存在')
+    child = db.query(User).filter(User.pk_users == req.fk_users).first()
+    if not child or child.fk_users_parent != current_user.pk_users:
+        raise HTTPException(status_code=403, detail='无权审批该申请')
+    if req.status != 'pending':
+        raise HTTPException(status_code=400, detail='该申请已处理')
+    req.status = 'rejected'
+    db.commit()
+    return {'success': True, 'childName': child.name}
 
 
 # ══════════════════════════════════════════════════════════════

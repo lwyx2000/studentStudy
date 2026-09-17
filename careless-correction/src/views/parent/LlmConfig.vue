@@ -43,7 +43,7 @@ async function testConnection() {
       <div class="hero-card">
         <span class="eyebrow">🤖 大模型配置</span>
         <h1>配置 AI 分析引擎</h1>
-        <p class="lead">接入大模型用于错题分析、拍照打卡识别和成长评估。支持 OpenAI 兼容接口。</p>
+        <p class="lead">接入大模型用于成长评估与预警分析，支持 OpenAI 兼容接口。</p>
       </div>
       <div class="panel" style="display:flex;flex-direction:column;justify-content:center">
         <div class="card-title">

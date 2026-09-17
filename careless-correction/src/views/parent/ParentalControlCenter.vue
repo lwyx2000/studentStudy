@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { api, normalizeTask } from '../../utils/api'
 import { useBadgeStore, useChildSelectStore, useMistakeStore, useParentStore, useTaskStore } from '../../stores'
 import ChildSelector from '../../components/ChildSelector.vue'
+import PointsBreakdown from '../../components/PointsBreakdown.vue'
 
 const parentStore = useParentStore()
 const taskStore = useTaskStore()
@@ -281,6 +282,12 @@ onMounted(() => {
                   <strong>{{ checkinDetails.checkin.childName }}</strong>
                   <span class="muted">提交于 {{ checkinDetails.checkin.checkDate }}</span>
                 </div>
+                <PointsBreakdown
+                  :total-points="checkinDetails.checkin.totalPoints"
+                  :required-points="checkinDetails.checkin.requiredPoints"
+                  :optional-bonus="checkinDetails.checkin.optionalBonus"
+                  :all-done-bonus="checkinDetails.checkin.allDoneBonus"
+                />
                 <div class="summary-stats">
                   <div class="summary-stat">
                     <span class="summary-num">{{ checkinDetails.checkin.taskCount }}</span>
@@ -499,7 +506,7 @@ onMounted(() => {
       <button class="soft-card setting" @click="toggle('achievementNotification')">
         <div class="icon-tile">🎆</div>
         <h2>成就烟花</h2>
-        <p class="lead">{{ parentStore.settings.achievementNotification ? '已开启' : '已关闭' }}：里程碑时发送温和庆祝反馈。</p>
+        <p class="lead">{{ parentStore.settings.achievementNotification ? '已开启' : '已关闭' }}：解锁里程碑勋章时庆祝反馈。</p>
       </button>
       <button class="soft-card setting" @click="toggle('schoolSync')">
         <div class="icon-tile">🏫</div>

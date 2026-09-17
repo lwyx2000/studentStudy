@@ -44,6 +44,8 @@ class SubTaskOut(BaseModel):
     type: str
     week_day: str | None = None
     sort_order: int = 0
+    is_optional: bool = False
+    reward_points: int | None = None
 
     model_config = {'from_attributes': True}
 

@@ -60,6 +60,7 @@ watch(() => childSelectStore.selectedChildId, () => {
 
 onMounted(() => {
   loadChildData()
+  loadRedemptionRequests()
 })
 
 // ── Manual award/deduct ──
@@ -120,6 +121,48 @@ async function redeemAppleForChild() {
     alert(e.message || '操作失败')
   }
   redeemLoading.value = false
+}
+
+// ── Apple redemption requests（孩子提交的兑换申请审批）──
+interface AppleRedemptionRequestInfo {
+  id: number
+  childId: number
+  childName: string
+  count: number
+  reason: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: string | null
+}
+const redemptionRequests = ref<AppleRedemptionRequestInfo[]>([])
+
+async function loadRedemptionRequests() {
+  try {
+    const res = await api.points.getAppleRedemptionRequests()
+    redemptionRequests.value = res.requests ?? []
+  } catch { /* offline */ }
+}
+
+const pendingRedemptionCount = computed(() =>
+  redemptionRequests.value.filter(r => r.status === 'pending').length,
+)
+
+async function approveRedemption(id: number) {
+  try {
+    await api.points.approveAppleRedemption(id)
+    await loadRedemptionRequests()
+    await loadChildData()
+  } catch (e: any) {
+    alert(e.message || '审批失败')
+  }
+}
+
+async function rejectRedemption(id: number) {
+  try {
+    await api.points.rejectAppleRedemption(id)
+    await loadRedemptionRequests()
+  } catch (e: any) {
+    alert(e.message || '操作失败')
+  }
 }
 
 // ── Reward items ──
@@ -285,6 +328,29 @@ function addItem() {
 
       <!-- Tab: Apple Management -->
       <template v-if="activeTab === 'apples'">
+        <!-- 兑换申请审批 -->
+        <section v-if="pendingRedemptionCount > 0" class="panel" style="margin-bottom:18px;border:2px solid #ff9800">
+          <div class="card-title">
+            <h2>📨 孩子的兑换申请</h2>
+            <span class="tag pulse-tag">{{ pendingRedemptionCount }} 条待审批</span>
+          </div>
+          <p class="muted" style="font-size:13px;margin-bottom:10px">
+            孩子在「阳光树」提交的苹果兑换申请会出现在这里，审批通过后才会扣苹果（1 苹果 = 1 元）。
+          </p>
+          <div class="list">
+            <div v-for="r in redemptionRequests.filter(x => x.status === 'pending')" :key="r.id" class="list-row">
+              <div style="flex:1;min-width:0">
+                <strong>{{ r.childName }} 申请兑换 {{ r.count }} 个苹果（= {{ r.count }} 元）</strong>
+                <span class="muted" style="display:block;font-size:13px">用途：{{ r.reason }}</span>
+              </div>
+              <div style="display:flex;gap:8px;flex-shrink:0">
+                <button class="btn approve-mini" @click="approveRedemption(r.id)">✅ 通过</button>
+                <button class="btn reject-mini" @click="rejectRedemption(r.id)">❌ 驳回</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="grid-2">
           <div class="panel">
             <div class="card-title">
@@ -517,5 +583,29 @@ function addItem() {
   color: var(--muted);
   padding: 8px;
   margin-bottom: 8px;
+}
+.pulse-tag {
+  background: #ff9800 !important;
+  color: #fff !important;
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+  50% { box-shadow: 0 0 0 6px rgba(255, 152, 0, .15); }
+}
+.approve-mini {
+  background: var(--primary) !important;
+  color: #fff !important;
+  border: none !important;
+  padding: 8px 16px !important;
+  font-size: 14px !important;
+  white-space: nowrap;
+}
+.reject-mini {
+  background: #fff !important;
+  color: #c62828 !important;
+  border: 1.5px solid #ef9a9a !important;
+  padding: 8px 16px !important;
+  font-size: 14px !important;
+  white-space: nowrap;
 }
 </style>
