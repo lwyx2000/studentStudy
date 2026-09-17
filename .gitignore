@@ -19,3 +19,15 @@ nul
 
 # 部署环境变量（本地/服务器 .env，勿提交；模板为 .env.example）
 .env
+
+# 安卓 APK 编译产物
+careless-correction/android/.gradle/
+careless-correction/android/app/build/
+careless-correction/android/build/
+careless-correction/android/local.properties
+careless-correction/android/captures/
+careless-correction/android/app/src/main/assets/public/
+careless-correction/android/app/release/
+*.apk
+*.aab
+*.keystore

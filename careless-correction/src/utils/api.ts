@@ -4,7 +4,8 @@ import type {
   MistakeCategory, MistakeRecord, ParentSettings, RewardItem, SubTaskItem, SunlightRecord, TaskItem, UserProfile,
 } from '../types'
 
-const API_BASE = '/api/v1'
+// API 地址：优先使用环境变量（Vite 构建时注入），否则用相对路径（同域部署时）
+const API_BASE = import.meta.env.VITE_API_BASE || '/api/v1'
 
 let authToken: string | null = null
 
