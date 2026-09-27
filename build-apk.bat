@@ -82,7 +82,11 @@ if errorlevel 1 (
     set HAS_ERROR=1
     goto :end
 )
-for /f "tokens=*" %%i in ('java -version 2^>^&1 | findstr /i "version"') do echo [OK] Java: %%i
+for /f "usebackq tokens=*" %%i in (`java -version 2^>^&1`) do (
+    echo [OK] Java: %%i
+    goto :java_done
+)
+:java_done
 
 REM 检查 Android SDK
 set SDK_FOUND=0
