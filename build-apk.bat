@@ -74,16 +74,30 @@ if not exist "%ANDROID_DIR%" (
 )
 echo [OK] 安卓项目存在
 
-REM 检查 Java
-where java >nul 2>&1
-if errorlevel 1 (
-    echo [错误] 未安装 Java JDK，请安装 JDK 17+
-    echo        下载: https://adoptium.net/
+REM 检查 / 定位 Java JDK 17+ (Gradle 8 + AGP 8 必须 JDK 17+，JDK 8 必挂)
+set JDK_FOUND=0
+REM 1) 本项目已安装的 JDK 21
+if exist "D:\java\jdk-21\jdk-21.0.12.1+1\bin\java.exe" (
+    set "JAVA_HOME=D:\java\jdk-21\jdk-21.0.12.1+1"
+    set JDK_FOUND=1
+)
+REM 2) Android Studio 自带 JBR (JDK 17)
+if "%JDK_FOUND%"=="0" if exist "F:\Program Files\Android\Android Studio\jbr\bin\java.exe" (
+    set "JAVA_HOME=F:\Program Files\Android\Android Studio\jbr"
+    set JDK_FOUND=1
+)
+REM 3) 系统已有的 JAVA_HOME (若已是 17+)
+if "%JDK_FOUND%"=="0" if not "%JAVA_HOME%"=="" (
+    if exist "%JAVA_HOME%\bin\java.exe" set JDK_FOUND=1
+)
+if "%JDK_FOUND%"=="0" (
+    echo [错误] 未找到 JDK 17+，请安装 JDK 17/21
+    echo        推荐: https://adoptium.net/  (本项目 JDK 21 位于 D:\java\jdk-21)
     set HAS_ERROR=1
     goto :end
 )
-for /f "usebackq tokens=*" %%i in (`java -version 2^>^&1`) do (
-    echo [OK] Java: %%i
+for /f "usebackq tokens=*" %%i in (`"%JAVA_HOME%\bin\java" -version 2^>^&1`) do (
+    echo [OK] Java (JAVA_HOME): %%i
     goto :java_done
 )
 :java_done
@@ -110,6 +124,16 @@ if "%SDK_FOUND%"=="0" (
         set SDK_FOUND=1
         echo [OK] 自动检测到 Android SDK: !LOCAL_SDK!
     )
+)
+if "%SDK_FOUND%"=="0" if exist "F:\androidSdk" (
+    set "ANDROID_HOME=F:\androidSdk"
+    set SDK_FOUND=1
+    echo [OK] 自动检测到 Android SDK: F:\androidSdk
+)
+if "%SDK_FOUND%"=="0" if exist "F:\Program Files\Android\Sdk" (
+    set "ANDROID_HOME=F:\Program Files\Android\Sdk"
+    set SDK_FOUND=1
+    echo [OK] 自动检测到 Android SDK: F:\Program Files\Android\Sdk
 )
 if "%SDK_FOUND%"=="0" (
     echo [错误] 未找到 Android SDK
