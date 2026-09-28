@@ -23,8 +23,8 @@ const SCENE_HEIGHT = 420
 // ── Scene object collections（漫画式 3D：Toon 材质 + 描边壳）──
 interface SunOrbObj {
   group: THREE.Group
-  bodyMat: THREE.MeshToonMaterial
-  outlineMat: THREE.MeshBasicMaterial
+  discMat: THREE.SpriteMaterial
+  rayMat: THREE.SpriteMaterial
   haloMat: THREE.SpriteMaterial
   labelMat: THREE.SpriteMaterial
   pendingId: number
@@ -780,6 +780,62 @@ function syncOrbs() {
   }
 }
 
+// 小太阳圆盘贴图：径向渐变 + 描边 + 高光
+function makeOrbDiscTexture() {
+  const size = 128
+  const cv = document.createElement('canvas')
+  cv.width = size
+  cv.height = size
+  const ctx = cv.getContext('2d')!
+  const c = size / 2
+  const g = ctx.createRadialGradient(c - 12, c - 14, 6, c, c, 50)
+  g.addColorStop(0, '#fff9c4')
+  g.addColorStop(0.55, '#ffd54f')
+  g.addColorStop(1, '#ffb300')
+  ctx.fillStyle = g
+  ctx.beginPath()
+  ctx.arc(c, c, 44, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.lineWidth = 5
+  ctx.strokeStyle = '#f57f17'
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(255,255,255,0.75)'
+  ctx.beginPath()
+  ctx.arc(c - 14, c - 16, 10, 0, Math.PI * 2)
+  ctx.fill()
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+// 小太阳光芒贴图：12 根短锥形射线
+function makeOrbRayTexture() {
+  const size = 128
+  const cv = document.createElement('canvas')
+  cv.width = size
+  cv.height = size
+  const ctx = cv.getContext('2d')!
+  const c = size / 2
+  ctx.fillStyle = '#ffd54f'
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2
+    const cos = Math.cos(a)
+    const sin = Math.sin(a)
+    const half = 5
+    const inner = 44
+    const outer = 62
+    ctx.beginPath()
+    ctx.moveTo(c + cos * inner - sin * half, c + sin * inner + cos * half)
+    ctx.lineTo(c + cos * outer, c + sin * outer)
+    ctx.lineTo(c + cos * inner + sin * half, c + sin * inner - cos * half)
+    ctx.closePath()
+    ctx.fill()
+  }
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
 function createOrb(pendingId: number, amount: number, index: number): SunOrbObj {
   // 树前方空中网格布局（5 列 × 多行）
   const col = index % 5
@@ -789,23 +845,24 @@ function createOrb(pendingId: number, amount: number, index: number): SunOrbObj 
 
   const group = new THREE.Group()
 
-  // 金色小球 + 描边
-  const bodyMat = toonMat(0xffd54f)
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.38, 16, 12), bodyMat)
-  const outlineMat = new THREE.MeshBasicMaterial({
-    color: OUTLINE_COLOR_HEX, side: THREE.BackSide, transparent: true, opacity: 1,
-  })
-  const outline = new THREE.Mesh(body.geometry, outlineMat)
-  outline.scale.setScalar(1.1)
-  body.add(outline)
-  group.add(body)
+  // 小太阳造型：旋转光芒 + 固定圆盘（替代原来的金色硬币球）
+  const rayMat = new THREE.SpriteMaterial({ map: makeOrbRayTexture(), transparent: true, depthWrite: false })
+  const ray = new THREE.Sprite(rayMat)
+  ray.scale.setScalar(1.7)
+  group.add(ray)
+  group.userData.ray = ray
+
+  const discMat = new THREE.SpriteMaterial({ map: makeOrbDiscTexture(), transparent: true, depthWrite: false })
+  const disc = new THREE.Sprite(discMat)
+  disc.scale.setScalar(1.0)
+  group.add(disc)
 
   // 柔和光晕 Sprite
   const haloMat = new THREE.SpriteMaterial({
     map: makeHaloTexture(), transparent: true, depthWrite: false, opacity: 0.9,
   })
   const halo = new THREE.Sprite(haloMat)
-  halo.scale.setScalar(1.9)
+  halo.scale.setScalar(2.2)
   group.add(halo)
 
   // "+10" 文字 Sprite
@@ -814,28 +871,21 @@ function createOrb(pendingId: number, amount: number, index: number): SunOrbObj 
   })
   const label = new THREE.Sprite(labelMat)
   label.scale.set(1.3, 0.65, 1)
-  label.position.y = -0.75
+  label.position.y = -0.95
   group.add(label)
-
-  // 环绕旋转的橙色光圈
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.035, 8, 28), toonMat(0xffb300))
-  group.add(ring)
-  group.userData.ring = ring
 
   group.position.set(baseX, baseY, 1.2)
   group.scale.setScalar(0.9)
   group.userData.pendingId = pendingId
 
   return {
-    group, bodyMat, outlineMat, haloMat, labelMat,
+    group, discMat, rayMat, haloMat, labelMat,
     pendingId, amount, baseX, baseY,
     phase: Math.random() * Math.PI * 2,
     flying: false, flyT: 0,
     start: new THREE.Vector3(baseX, baseY, 1.2),
   }
 }
-const OUTLINE_COLOR_HEX = 0x3a3335
-
 function makeHaloTexture() {
   const cv = document.createElement('canvas')
   cv.width = 128
@@ -877,8 +927,10 @@ function disposeOrb(orb: SunOrbObj) {
     const m = o as THREE.Mesh
     if (m.isMesh) m.geometry.dispose()
   })
-  orb.bodyMat.dispose()
-  orb.outlineMat.dispose()
+  orb.discMat.map?.dispose()
+  orb.discMat.dispose()
+  orb.rayMat.map?.dispose()
+  orb.rayMat.dispose()
   orb.haloMat.map?.dispose()
   orb.haloMat.dispose()
   orb.labelMat.map?.dispose()
@@ -922,16 +974,10 @@ function animate() {
       orb.group.position.lerpVectors(orb.start, ORB_TARGET, ease)
       orb.group.position.y += Math.sin(t * Math.PI) * 1.2
       orb.group.scale.setScalar(0.9 * (1 - t))
-      orb.bodyMat.opacity = 1 - t
-      orb.outlineMat.opacity = 1 - t
+      orb.discMat.opacity = 1 - t
+      orb.rayMat.opacity = 1 - t
       orb.haloMat.opacity = 0.9 * (1 - t)
       orb.labelMat.opacity = 1 - t
-      const flyRing = orb.group.userData.ring as THREE.Mesh | undefined
-      if (flyRing) {
-        const rm = flyRing.material as THREE.MeshToonMaterial
-        rm.transparent = true
-        rm.opacity = 1 - t
-      }
       if (t >= 1) {
         disposeOrb(orb)
         sunOrbs.splice(i, 1)
@@ -940,12 +986,9 @@ function animate() {
     } else {
       orb.group.position.y = orb.baseY + Math.sin(elapsed * 2.4 + orb.phase) * 0.28
       orb.group.position.x = orb.baseX + Math.sin(elapsed * 1.3 + orb.phase * 0.5) * 0.12
-      // 环绕光圈旋转
-      const ring = orb.group.userData.ring as THREE.Mesh | undefined
-      if (ring) {
-        ring.rotation.z += dt * 1.2
-        ring.rotation.x = Math.sin(elapsed * 1.5 + orb.phase) * 0.4
-      }
+      // 太阳光芒缓慢旋转
+      const ray = orb.group.userData.ray as THREE.Sprite | undefined
+      if (ray) ray.material.rotation += dt * 1.2
     }
   }
 

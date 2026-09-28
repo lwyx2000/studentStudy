@@ -448,7 +448,7 @@ function formatTime(iso?: string): string {
 .tab-nav {
   display: flex;
   gap: 8px;
-  margin-bottom: 18px;
+  margin-bottom: 0;
 }
 .tab-btn {
   position: relative;
