@@ -4,46 +4,28 @@ import {
   Application,
   Container,
   Graphics,
-  Sprite,
   Text,
-  Texture,
-  Assets,
   type Ticker,
 } from 'pixi.js'
 import { useUserStore } from '../../stores'
 import { api } from '../../utils/api'
 import { Typewriter, Modal } from 'animal-island-vue'
 
-// ── Image assets ──
-import sunImgUrl from '../../assets/img/3.png'
-import cloudImgUrl from '../../assets/img/2.png'
-import cloudStripImgUrl from '../../assets/img/10.png'
-import treeImgUrl from '../../assets/img/9.png'
-import groundImgUrl from '../../assets/img/13.png'
-import appleImgUrl from '../../assets/img/1.png'
-import appleRedImgUrl from '../../assets/img/7.png'
-import appleGoldImgUrl from '../../assets/img/7 (2).png'
-import butterflyBlueImgUrl from '../../assets/img/8.png'
-import butterflyBlue2ImgUrl from '../../assets/img/8 (2).png'
-import flowerImgUrl from '../../assets/img/6.png'
-import saplingImgUrl from '../../assets/img/4.png'
 
 const userStore = useUserStore()
 
 // ── DOM ref for PixiJS canvas mount ──
 const sceneRef = ref<HTMLDivElement>()
 let app: Application | null = null
+let resizeObserver: ResizeObserver | null = null
 
 // ── Scene constants ──
 const SCENE_HEIGHT = 420
 const MAX_ORBS = 20
 
-// ── Loaded textures ──
-let textures: Record<string, Texture> = {}
-
 // ── Scene object collections ──
 interface SunOrbObj {
-  sprite: Sprite
+  sprite: Graphics
   label: Text | null
   pendingId: number
   amount: number
@@ -60,8 +42,8 @@ interface SunOrbObj {
 
 interface BirdObj {
   container: Container
-  frameA: Sprite   // 8.png  - wings up
-  frameB: Sprite   // 8(2).png - wings down
+  frameA: Graphics
+  frameB: Graphics
   phase: number
   speed: number
   centerX: number
@@ -72,7 +54,7 @@ interface BirdObj {
 }
 
 interface LeafObj {
-  sprite: Sprite
+  sprite: Graphics
   x: number
   y: number
   vx: number
@@ -116,7 +98,8 @@ let flowers: FlowerObj[] = []
 // Tree parts
 let treeContainer: Container | null = null
 let treeGlow: Graphics | null = null
-let treeApples: Sprite[] = []
+interface AppleObj { sprite: Graphics; baseY: number; phase: number }
+let treeApples: AppleObj[] = []
 let sunRayContainer: Container | null = null
 let sceneWidth = 800
 
@@ -233,43 +216,40 @@ const redeemHistory = computed(() =>
 )
 
 // ══════════════════════════════════════════════════════════════
-//  PixiJS Scene — Sprite-based rendering using image assets
+//  PixiJS Scene — vector illustration rendered entirely with Graphics
 // ══════════════════════════════════════════════════════════════
 
-// ── Texture loading ──
-async function loadTextures() {
-  const [sun, cloud, cloudStrip, tree, ground, apple, appleRed, appleGold, butterflyBlue, butterflyBlue2, flower, sapling] = await Promise.all([
-    Assets.load(sunImgUrl),
-    Assets.load(cloudImgUrl),
-    Assets.load(cloudStripImgUrl),
-    Assets.load(treeImgUrl),
-    Assets.load(groundImgUrl),
-    Assets.load(appleImgUrl),
-    Assets.load(appleRedImgUrl),
-    Assets.load(appleGoldImgUrl),
-    Assets.load(butterflyBlueImgUrl),
-    Assets.load(butterflyBlue2ImgUrl),
-    Assets.load(flowerImgUrl),
-    Assets.load(saplingImgUrl),
-  ])
-  textures = { sun, cloud, cloudStrip, tree, ground, apple, appleRed, appleGold, butterflyBlue, butterflyBlue2, flower, sapling }
+// ── Hand-drawn Pixi scene primitives ──
+// Keeping every illustration vector-based gives the scene a crisp, cohesive look
+// at every screen width without relying on a collage of image assets.
+function sunShape(radius: number, color = '#ffd54f') {
+  return new Graphics().circle(0, 0, radius).fill(color).circle(-radius * .28, -radius * .28, radius * .22).fill('#fff7bd')
+}
+function appleShape(color: string) {
+  const g = new Graphics()
+  g.circle(-7, 2, 11).fill(color).circle(7, 2, 11).fill(color)
+  g.ellipse(3, -13, 6, 3).fill('#48a33b').moveTo(0, -8).lineTo(3, -15).stroke({ width: 2, color: '#75451f' })
+  return g
+}
+function flowerShape() {
+  const g = new Graphics().moveTo(0, 12).lineTo(0, -8).stroke({ width: 2, color: '#44934b' })
+  for (let i = 0; i < 5; i++) g.circle(Math.cos(i * 1.256) * 4, -8 + Math.sin(i * 1.256) * 4, 3).fill('#ff8ab0')
+  return g.circle(0, -8, 3).fill('#ffd54f')
 }
 
-// ── Sky background (solid blue) ──
+// ── Sky background ──
 function drawSky(container: Container, w: number, h: number) {
   const g = new Graphics()
-  g.rect(0, 0, w, h).fill('#5dade2')
+  g.rect(0, 0, w, h).fill('#75c8f3')
+  g.rect(0, h * .46, w, h * .24).fill({ color: '#aee3fa', alpha: .55 })
   container.addChild(g)
 }
 
 // ── Sun (sprite from 3.png) ──
 function drawSun(container: Container, w: number) {
-  if (!textures.sun) return
-  const sun = new Sprite(textures.sun)
-  sun.anchor.set(0.5)
+  const sun = sunShape(25)
   sun.x = w - 70
   sun.y = 55
-  sun.scale.set(0.45)
   container.addChild(sun)
 
   // Sun rays (Graphics, for rotation animation)
@@ -290,58 +270,20 @@ function drawSun(container: Container, w: number) {
   sunRayContainer.addChild(rayG)
 }
 
-// ── Clouds: 2.png drifting clusters only ---
+// ── Clouds made from overlapping round puffs ---
 function drawClouds(container: Container, w: number, _h: number) {
-  if (!textures.cloud) return
-  const sunZoneX = w - 160
-  const cloudScale = 0.25
-
-  // Store clusters with their scale for sorting
-  const clusters: { cluster: Container; maxScale: number }[] = []
-
   for (let c = 0; c < 5; c++) {
     const cluster = new Container()
-    const numPuffs = 2 + Math.floor(Math.random() * 3)
-    const baseY = 10 + Math.random() * 90
-
-    let prevX = 0
-    let maxScale = 0
-    for (let p = 0; p < numPuffs; p++) {
-      const s = new Sprite(textures.cloud)
-      s.anchor.set(0.5)
-      // Random scale: 0.5x to 4x base size
-      const puffScaleX = cloudScale * (0.5 + Math.random() * 3.5)
-      // Random stretch: 0.5x to 2x on Y axis
-      const puffScaleY = puffScaleX * (0.5 + Math.random() * 1.5)
-      s.scale.set(puffScaleX, puffScaleY)
-      s.x = prevX + (Math.random() * 20 - 10)
-      s.y = (Math.random() * 25 - 12)
-      // Smaller clouds are more transparent
-      const avgScale = (Math.abs(puffScaleX) + Math.abs(puffScaleY)) / 2
-      s.alpha = 0.3 + (avgScale / (cloudScale * 4)) * 0.7
-      cluster.addChild(s)
-      prevX = s.x + s.width * 0.4
-      maxScale = Math.max(maxScale, avgScale)
-    }
-
-    const startX = Math.random() * (sunZoneX + 100) - 100
-    cluster.x = startX
-    cluster.y = baseY
-
-    clusters.push({
-      cluster,
-      maxScale,
-    })
-  }
-
-  // Sort by max scale: larger clouds in front (higher z-index)
-  clusters.sort((a, b) => a.maxScale - b.maxScale)
-
-  for (const { cluster } of clusters) {
+    const size = 15 + Math.random() * 13
+    const puffs = new Graphics().roundRect(-size * 2, -size * .3, size * 4, size * .9, size).fill({ color: '#fff', alpha: .82 })
+    puffs.circle(-size, -size * .35, size * .8).fill({ color: '#fff', alpha: .82 }).circle(0, -size * .7, size).fill({ color: '#fff', alpha: .82 }).circle(size, -size * .35, size * .75).fill({ color: '#fff', alpha: .82 })
+    cluster.addChild(puffs)
+    cluster.x = Math.random() * (w + 160) - 140
+    cluster.y = 38 + Math.random() * 115
     container.addChild(cluster)
     clouds.push({
       container: cluster,
-      speed: 0.15 + Math.random() * 0.25,
+      speed: 0.18 + Math.random() * 0.28,
       startX: cluster.x,
     })
   }
@@ -349,57 +291,35 @@ function drawClouds(container: Container, w: number, _h: number) {
 
 // ── Grassland (ground strip 13.png only, no green fill) ──
 function drawGrassland(container: Container, w: number, h: number) {
-  if (!textures.ground) return
   const groundY = h * 0.55
-
-  // Tile the ground strip image across the width — this IS the ground
-  const groundTex = textures.ground
-  // Keep original aspect ratio, scale based on width
-  const scale = w / groundTex.width
-  const scaledTileW = groundTex.width * scale
-  let xOffset = 0
-  while (xOffset < w + scaledTileW) {
-    const gs = new Sprite(groundTex)
-    gs.x = xOffset
-    gs.y = groundY
-    gs.scale.set(scale)
-    container.addChild(gs)
-    xOffset += scaledTileW
-  }
+  container.addChild(new Graphics().rect(0, groundY, w, h - groundY).fill('#70c85b').rect(0, groundY, w, 14).fill('#8cda64'))
 
   // Flowers (sprites from 6.png) - swaying in wind
   const flowerXs = [0.05, 0.14, 0.8, 0.9, 0.04, 0.93]
   for (let i = 0; i < flowerXs.length; i++) {
     const fc = new Container()
-    const fs = new Sprite(textures.flower)
-    fs.anchor.set(0.5, 1)
-    fs.scale.set(0.32)
+    const fs = flowerShape()
     fc.addChild(fs)
     fc.x = flowerXs[i] * w
-    fc.y = h - 5 - (i % 2) * 15
+    fc.y = h - 8 - (i % 2) * 15
     // Pivot at bottom center so flower sways from ground
     fc.pivot.set(0, 0)
-    fs.x = 0
-    fs.y = 0
     container.addChild(fc)
     // Store for animation
     flowers.push({ container: fc, phase: Math.random() * Math.PI * 2, speed: 0.03 + Math.random() * 0.02 })
   }
 
-  // Saplings (sprites from 4.png) at edges
+  // Small code-drawn saplings at the edges
   for (const sx of [0.1, 0.88]) {
-    const ss = new Sprite(textures.sapling)
-    ss.anchor.set(0.5, 1)
-    ss.x = sx * w
-    ss.y = h - 5
-    ss.scale.set(0.5)
+    const ss = new Graphics().moveTo(0, 0).lineTo(0, -34).stroke({ width: 4, color: '#694529' })
+    ss.circle(-8, -28, 10).fill('#53ad4a').circle(8, -30, 12).fill('#62bc52').circle(0, -42, 11).fill('#75c95e')
+    ss.x = sx * w; ss.y = h - 7
     container.addChild(ss)
   }
 }
 
 // ── Apple Tree (sprite 9.png, large, base embedded in grass) ──
 function drawTree(container: Container, w: number, h: number) {
-  if (!textures.tree) return
   treeContainer = new Container()
 
   // Tree glow (when ready to grow apple)
@@ -410,10 +330,11 @@ function drawTree(container: Container, w: number, h: number) {
   treeGlow.visible = false
   treeContainer.addChild(treeGlow)
 
-  // Tree sprite (9.png is 512×512, anchor bottom-center, enlarged)
-  const tree = new Sprite(textures.tree)
-  tree.anchor.set(0.5, 1)
-  tree.scale.set(0.72)   // bigger tree
+  const tree = new Graphics()
+  tree.moveTo(-27, 0).bezierCurveTo(-38, -80, -18, -120, -56, -180).lineTo(-24, -181).lineTo(-6, -116).lineTo(13, -210).lineTo(38, -204).bezierCurveTo(14, -122, 38, -70, 28, 0).closePath().fill('#8d5a32')
+  tree.moveTo(-13, -5).lineTo(0, -180).lineTo(14, -8).fill('#b77a42')
+  const canopy = [[-72,-210,55],[-20,-252,64],[42,-226,58],[-58,-282,49],[18,-302,56],[74,-276,43]]
+  for (const [x, y, r] of canopy) tree.circle(x, y, r).fill('#3e9e4e').circle(x - 5, y - 7, r * .78).fill('#62bc57')
   treeContainer.addChild(tree)
 
   // Position: tree base embedded INTO grass
@@ -435,11 +356,11 @@ function drawTree(container: Container, w: number, h: number) {
 
 // ── Apples on tree (sprites from 1.png, 7.png, 7(2).png) ──
 function drawApplesOnTree() {
-  if (!treeContainer || !textures.apple) return
+  if (!treeContainer) return
   // Remove old apples
   for (const a of treeApples) {
-    treeContainer.removeChild(a)
-    a.destroy()
+    treeContainer.removeChild(a.sprite)
+    a.sprite.destroy()
   }
   treeApples = []
 
@@ -457,20 +378,19 @@ function drawApplesOnTree() {
   for (let i = 0; i < count; i++) {
     const pos = positions[i]
     // Cycle through apple variants
-    const tex = i % 3 === 0 ? textures.apple : (i % 3 === 1 ? textures.appleRed : textures.appleGold)
-    const s = new Sprite(tex)
-    s.anchor.set(0.5)
+    const colors = ['#e53935', '#f5a623', '#5dbca9']
+    const s = appleShape(colors[i % colors.length])
     s.x = pos.x
     s.y = pos.y
-    s.scale.set(0.35)
+    s.scale.set(.8)
     treeContainer.addChild(s)
-    treeApples.push(s)
+    treeApples.push({ sprite: s, baseY: pos.y, phase: i * 1.4 })
   }
 }
 
 // ── Sun Orbs (待收集阳光，sprites from 3.png) ──
 function updateOrbs() {
-  if (!app || !textures.sun) return
+  if (!app) return
   const pending = userStore.pendingSunlight
 
   // Remove orbs no longer in pending (skip flying ones)
@@ -502,11 +422,9 @@ function createOrb(pendingId: number, amount: number, index: number): SunOrbObj 
   const baseX = sceneWidth * (0.06 + col * 0.16 + ((row % 2) * 0.08))
   const baseY = SCENE_HEIGHT * (0.08 + row * 0.12)
 
-  const sprite = new Sprite(textures.sun)
-  sprite.anchor.set(0.5)
+  const sprite = sunShape(18)
   sprite.x = baseX
   sprite.y = baseY
-  sprite.scale.set(0.2)
   sprite.eventMode = 'static'
   sprite.cursor = 'pointer'
   sprite.hitArea = { contains: (x: number, y: number) => Math.abs(x) < 30 && Math.abs(y) < 30 }
@@ -555,21 +473,13 @@ function createOrb(pendingId: number, amount: number, index: number): SunOrbObj 
 
 // ── Birds (8.png + 8(2).png as two-frame wing flap) ──
 function spawnBirds(container: Container) {
-  if (!textures.butterflyBlue || !textures.butterflyBlue2) return
   for (let i = 0; i < 3; i++) {
     const c = new Container()
-
-    // Frame A: 8.png  (wings up)
-    const frameA = new Sprite(textures.butterflyBlue)
-    frameA.anchor.set(0.5)
-    frameA.scale.set(0.38)
+    const frameA = new Graphics().ellipse(-7, -4, 8, 4).fill('#9275db').ellipse(7, -4, 8, 4).fill('#a78bea').circle(0, 0, 2).fill('#3d4258')
     frameA.visible = true
     c.addChild(frameA)
 
-    // Frame B: 8(2).png (wings down)
-    const frameB = new Sprite(textures.butterflyBlue2)
-    frameB.anchor.set(0.5)
-    frameB.scale.set(0.38)
+    const frameB = new Graphics().ellipse(-5, 0, 4, 9).fill('#9275db').ellipse(5, 0, 4, 9).fill('#a78bea').circle(0, 0, 2).fill('#3d4258')
     frameB.visible = false
     c.addChild(frameB)
 
@@ -589,11 +499,8 @@ function spawnBirds(container: Container) {
 
 // ── Falling leaves (sprites from 6.png, small) ──
 function spawnLeaves(container: Container) {
-  if (!textures.flower) return
   for (let i = 0; i < 5; i++) {
-    const s = new Sprite(textures.flower)
-    s.anchor.set(0.5)
-    s.scale.set(0.14)
+    const s = new Graphics().ellipse(0, 0, 5, 9).fill(i % 2 ? '#f2a846' : '#4ca653')
     container.addChild(s)
     leaves.push({
       sprite: s,
@@ -661,7 +568,7 @@ function update(ticker: Ticker) {
       orb.sprite.x = orb.flyStartX + (orb.flyTargetX - orb.flyStartX) * ease
       orb.sprite.y = orb.flyStartY + (orb.flyTargetY - orb.flyStartY) * ease
       orb.sprite.y -= Math.sin(t * Math.PI) * 40
-      orb.sprite.scale.set(0.2 * (1 - t * 0.7))
+      orb.sprite.scale.set(1 - t * 0.7)
       orb.sprite.alpha = 1 - t
       if (orb.label) {
         orb.label.x = orb.sprite.x
@@ -764,16 +671,14 @@ function update(ticker: Ticker) {
 
   // Apples bobbing
   for (let i = 0; i < treeApples.length; i++) {
-    treeApples[i].y += Math.sin(elapsed * 0.03 + i) * 0.3
+    const apple = treeApples[i]
+    apple.sprite.y = apple.baseY + Math.sin(elapsed * 0.03 + apple.phase) * 3
   }
 }
 
 // ── Scene init ──
 async function initScene() {
   if (!sceneRef.value) return
-
-  // Load textures first
-  await loadTextures()
 
   app = new Application()
   await app.init({
@@ -803,7 +708,7 @@ async function initScene() {
   app.ticker.add(update)
 
   // Resize handler
-  const resizeObserver = new ResizeObserver(() => {
+  resizeObserver = new ResizeObserver(() => {
     if (!app || !sceneRef.value) return
     const newW = sceneRef.value.clientWidth
     if (newW > 0 && Math.abs(newW - sceneWidth) > 1) {
@@ -859,6 +764,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
   if (app) {
     app.destroy(true)
     app = null
