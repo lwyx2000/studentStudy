@@ -266,10 +266,10 @@ function createSunDiscSprite() {
   ctx.fill()
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: false, depthTest: false, depthWrite: false })
   const sprite = new THREE.Sprite(mat)
   sprite.scale.setScalar(3.0)
-  sprite.renderOrder = 7
+  sprite.renderOrder = -9   // 背景层：最先绘制，所有场景物体叠在其上
   return sprite
 }
 
@@ -298,10 +298,10 @@ function createSunRaysSprite() {
   }
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: false, depthTest: false, depthWrite: false })
   const sprite = new THREE.Sprite(mat)
   sprite.scale.setScalar(4.6)
-  sprite.renderOrder = 6
+  sprite.renderOrder = -10  // 光芒在圆盘之后（更靠背景）
   return sprite
 }
 
