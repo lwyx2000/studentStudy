@@ -266,7 +266,9 @@ function createSunDiscSprite() {
   ctx.fill()
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: false, depthTest: false, depthWrite: false })
+  // transparent:false + alphaTest：透明像素被丢弃（不会渲染成黑色），
+  // 太阳落在不透明通道最先绘制，蝴蝶/树等所有物体都叠在其前面
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: false, alphaTest: 0.5, depthTest: false, depthWrite: false })
   const sprite = new THREE.Sprite(mat)
   sprite.scale.setScalar(3.0)
   sprite.renderOrder = -9   // 背景层：最先绘制，所有场景物体叠在其上
@@ -298,7 +300,7 @@ function createSunRaysSprite() {
   }
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: false, depthTest: false, depthWrite: false })
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: false, alphaTest: 0.5, depthTest: false, depthWrite: false })
   const sprite = new THREE.Sprite(mat)
   sprite.scale.setScalar(4.6)
   sprite.renderOrder = -10  // 光芒在圆盘之后（更靠背景）
