@@ -48,6 +48,8 @@ interface ButterflyObj {
   centerZ: number
   radiusX: number
   radiusY: number
+  zAmp: number
+  zPhase: number
   flapPhase: number
 }
 
@@ -234,7 +236,7 @@ function addOutline(mesh: THREE.Mesh, thickness = 1.06) {
   return outline
 }
 
-// ── 装饰太阳：圆盘（笑脸，固定不转）+ 光芒（单独 Sprite 旋转），挂相机右上角 ──
+// ── 装饰太阳：圆盘（固定不转）+ 光芒（单独 Sprite 旋转），挂相机右上角 ──
 function createSunDiscSprite() {
   const size = 256
   const cv = document.createElement('canvas')
@@ -261,31 +263,6 @@ function createSunDiscSprite() {
   ctx.beginPath()
   ctx.arc(c - 26, c - 30, 20, 0, Math.PI * 2)
   ctx.fill()
-  // 眼睛（卡通圆眼 + 高光点）
-  ctx.fillStyle = OUTLINE_CSS
-  ctx.beginPath()
-  ctx.arc(c - 26, c - 6, 9, 0, Math.PI * 2)
-  ctx.arc(c + 26, c - 6, 9, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = '#ffffff'
-  ctx.beginPath()
-  ctx.arc(c - 23, c - 9, 3.2, 0, Math.PI * 2)
-  ctx.arc(c + 29, c - 9, 3.2, 0, Math.PI * 2)
-  ctx.fill()
-  // 微笑
-  ctx.strokeStyle = OUTLINE_CSS
-  ctx.lineWidth = 8
-  ctx.lineCap = 'round'
-  ctx.beginPath()
-  ctx.arc(c, c + 10, 32, 0.28 * Math.PI, 0.72 * Math.PI)
-  ctx.stroke()
-  // 腮红
-  ctx.fillStyle = 'rgba(255,138,80,0.5)'
-  ctx.beginPath()
-  ctx.arc(c - 52, c + 16, 12, 0, Math.PI * 2)
-  ctx.arc(c + 52, c + 16, 12, 0, Math.PI * 2)
-  ctx.fill()
-
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
@@ -295,7 +272,7 @@ function createSunDiscSprite() {
   return sprite
 }
 
-// 光芒：8 根内窄外宽的梯形射线，带深色描边，单独 Sprite 只旋转它
+// 光芒：8 根简洁的锥形射线（常规太阳造型），单独 Sprite 只旋转它
 function createSunRaysSprite() {
   const size = 512
   const cv = document.createElement('canvas')
@@ -303,23 +280,20 @@ function createSunRaysSprite() {
   cv.height = size
   const ctx = cv.getContext('2d')!
   const c = size / 2
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2
     const cos = Math.cos(a)
     const sin = Math.sin(a)
+    const baseHalf = 15
+    const inner = 100
+    const outer = 152
     ctx.beginPath()
-    ctx.moveTo(c + cos * 104 - sin * 11, c + sin * 104 + cos * 11)
-    ctx.lineTo(c + cos * 104 + sin * 11, c + sin * 104 - cos * 11)
-    ctx.lineTo(c + cos * 148 + sin * 19, c + sin * 148 - cos * 19)
-    ctx.arc(c + cos * 148, c + sin * 148, 19, a + Math.PI / 2, a - Math.PI / 2, true)
+    ctx.moveTo(c + cos * inner - sin * baseHalf, c + sin * inner + cos * baseHalf)
+    ctx.lineTo(c + cos * outer, c + sin * outer)
+    ctx.lineTo(c + cos * inner + sin * baseHalf, c + sin * inner - cos * baseHalf)
     ctx.closePath()
     ctx.fillStyle = '#ffd54f'
     ctx.fill()
-    ctx.strokeStyle = OUTLINE_CSS
-    ctx.lineWidth = 8
-    ctx.stroke()
   }
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
@@ -465,47 +439,11 @@ function buildTree() {
     [-0.8, 5.35, -0.3, 1.05, true], [0.9, 5.25, -0.4, 1.0, false], [0.1, 3.7, 1.15, 1.0, true],
   ]
   const canopyGeo = new THREE.SphereGeometry(1, 18, 14)
-  for (let ci = 0; ci < canopySpecs.length; ci++) {
-    const [x, y, z, r, light] = canopySpecs[ci]
+  for (const [x, y, z, r, light] of canopySpecs) {
     const m = new THREE.Mesh(canopyGeo, light ? lightMat : darkMat)
     m.position.set(x, y, z)
     m.scale.setScalar(r)
     addOutline(m, 1.04)
-    // 中间主树冠正前方加卡通表情（漫画风小树脸）
-    if (ci === 0) {
-      const face = new THREE.Group()
-      const eyeWhiteGeo = new THREE.SphereGeometry(0.2, 12, 10)
-      const eyeWhiteMat = toonMat(0xffffff)
-      const pupilGeo = new THREE.SphereGeometry(0.095, 10, 8)
-      const pupilMat = toonMat(0x3a3335)
-      for (const ex of [-0.46, 0.46]) {
-        const ew = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat)
-        ew.position.set(ex, 0.05, 0)
-        ew.scale.set(1, 1.15, 0.5)
-        face.add(ew)
-        const ep = new THREE.Mesh(pupilGeo, pupilMat)
-        ep.position.set(ex + 0.03, 0.02, 0.09)
-        face.add(ep)
-      }
-      // 微笑：圆环弧段
-      const smile = new THREE.Mesh(
-        new THREE.TorusGeometry(0.34, 0.05, 8, 14, Math.PI * 0.85),
-        toonMat(0x3a3335),
-      )
-      smile.rotation.z = Math.PI + (Math.PI - Math.PI * 0.85) / 2
-      smile.position.set(0, -0.36, 0.05)
-      face.add(smile)
-      // 腮红
-      const blushMat = toonMat(0xff9d9d)
-      for (const bx of [-0.85, 0.85]) {
-        const blush = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), blushMat)
-        blush.position.set(bx, -0.22, 0)
-        blush.scale.set(1, 0.6, 0.4)
-        face.add(blush)
-      }
-      face.position.set(0, 0.15, 1.6)
-      m.add(face)
-    }
     treeGroup.add(m)
   }
 
@@ -721,17 +659,19 @@ function buildButterflies() {
       g.add(tip)
     }
 
-    g.scale.setScalar(0.85)
+    g.scale.setScalar(0.55)
     scene3d.add(g)
     butterflies.push({
       group: g, flapL, flapR,
       phase: Math.random() * Math.PI * 2,
-      speed: 0.5 + Math.random() * 0.4,
-      centerX: (Math.random() - 0.5) * 5,
-      centerY: 3.2 + Math.random() * 2.2,
-      centerZ: 1.5 + Math.random(),
-      radiusX: 2.2 + Math.random() * 1.6,
-      radiusY: 0.7 + Math.random() * 0.6,
+      speed: 0.16 + Math.random() * 0.12,
+      centerX: (Math.random() - 0.5) * 2,
+      centerY: 3.6 + (Math.random() - 0.5) * 1.5,
+      centerZ: 0.8,
+      radiusX: 6 + Math.random() * 2,
+      radiusY: 2.2 + Math.random() * 0.8,
+      zAmp: 2.2 + Math.random() * 0.8,
+      zPhase: Math.random() * Math.PI * 2,
       flapPhase: Math.random() * Math.PI * 2,
     })
   }
@@ -1010,11 +950,13 @@ function animate() {
     b.phase += b.speed * dt
     const px = b.centerX + Math.sin(b.phase) * b.radiusX
     const py = b.centerY + Math.sin(b.phase * 2) * b.radiusY + Math.sin(elapsed * 3 + b.flapPhase) * 0.12
+    // Z 轴前后穿梭：部分轨迹绕到树后方（被树遮挡）
+    const pz = b.centerZ + Math.sin(b.phase * 0.7 + b.zPhase) * b.zAmp
     const dir = Math.cos(b.phase) >= 0 ? 1 : -1
-    b.group.position.set(px, py, b.centerZ)
+    b.group.position.set(px, py, pz)
     b.group.scale.set(dir, 1, 1)
     b.group.rotation.z = Math.cos(b.phase) * 0.25 * dir
-    b.flapPhase += dt * 13
+    b.flapPhase += dt * 7
     const flap = Math.sin(b.flapPhase) * 0.85
     b.flapL.rotation.y = flap
     b.flapR.rotation.y = -flap
