@@ -50,6 +50,7 @@ interface ButterflyObj {
   radiusY: number
   zAmp: number
   zPhase: number
+  size: number
   flapPhase: number
 }
 
@@ -659,19 +660,20 @@ function buildButterflies() {
       g.add(tip)
     }
 
-    g.scale.setScalar(0.55)
+    g.scale.setScalar(0.3)
     scene3d.add(g)
     butterflies.push({
       group: g, flapL, flapR,
       phase: Math.random() * Math.PI * 2,
       speed: 0.16 + Math.random() * 0.12,
       centerX: (Math.random() - 0.5) * 2,
-      centerY: 3.6 + (Math.random() - 0.5) * 1.5,
-      centerZ: 0.8,
-      radiusX: 6 + Math.random() * 2,
-      radiusY: 2.2 + Math.random() * 0.8,
-      zAmp: 2.2 + Math.random() * 0.8,
+      centerY: 3.4 + (Math.random() - 0.5) * 1.0,
+      centerZ: 1.5,
+      radiusX: 5 + Math.random() * 1.5,
+      radiusY: 1.6 + Math.random() * 0.6,
+      zAmp: 4.5,
       zPhase: Math.random() * Math.PI * 2,
+      size: 0.3,
       flapPhase: Math.random() * Math.PI * 2,
     })
   }
@@ -950,11 +952,12 @@ function animate() {
     b.phase += b.speed * dt
     const px = b.centerX + Math.sin(b.phase) * b.radiusX
     const py = b.centerY + Math.sin(b.phase * 2) * b.radiusY + Math.sin(elapsed * 3 + b.flapPhase) * 0.12
-    // Z 轴前后穿梭：部分轨迹绕到树后方（被树遮挡）
-    const pz = b.centerZ + Math.sin(b.phase * 0.7 + b.zPhase) * b.zAmp
+    // Z 轴前后穿梭：部分轨迹绕到树后方（被树遮挡），同时产生近大远小
+    const pz = b.centerZ + Math.sin(b.phase + b.zPhase) * b.zAmp
     const dir = Math.cos(b.phase) >= 0 ? 1 : -1
     b.group.position.set(px, py, pz)
-    b.group.scale.set(dir, 1, 1)
+    // 翻转朝向时保留基础尺寸（避免覆盖 scale 导致蝴蝶变大）
+    b.group.scale.set(dir * b.size, b.size, b.size)
     b.group.rotation.z = Math.cos(b.phase) * 0.25 * dir
     b.flapPhase += dt * 7
     const flap = Math.sin(b.flapPhase) * 0.85
