@@ -1,12 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
-import {
-  Application,
-  Container,
-  Graphics,
-  Text,
-  type Ticker,
-} from 'pixi.js'
+import * as THREE from 'three'
 import { useUserStore } from '../../stores'
 import { api } from '../../utils/api'
 import { Typewriter, Modal } from 'animal-island-vue'
@@ -14,19 +8,25 @@ import { Typewriter, Modal } from 'animal-island-vue'
 
 const userStore = useUserStore()
 
-// ── DOM ref for PixiJS canvas mount ──
+// ── DOM ref for Three.js canvas mount ──
 const sceneRef = ref<HTMLDivElement>()
-let app: Application | null = null
+let renderer: THREE.WebGLRenderer | null = null
+let scene3d: THREE.Scene | null = null
+let camera: THREE.PerspectiveCamera | null = null
+let clock: THREE.Clock | null = null
+let rafId = 0
 let resizeObserver: ResizeObserver | null = null
 
 // ── Scene constants ──
 const SCENE_HEIGHT = 420
-const MAX_ORBS = 20
 
-// ── Scene object collections ──
+// ── Scene object collections（漫画式 3D：Toon 材质 + 描边壳）──
 interface SunOrbObj {
-  sprite: Graphics
-  label: Text | null
+  group: THREE.Group
+  bodyMat: THREE.MeshToonMaterial
+  outlineMat: THREE.MeshBasicMaterial
+  haloMat: THREE.SpriteMaterial
+  labelMat: THREE.SpriteMaterial
   pendingId: number
   amount: number
   baseX: number
@@ -34,98 +34,84 @@ interface SunOrbObj {
   phase: number
   flying: boolean
   flyT: number
-  flyStartX: number
-  flyStartY: number
-  flyTargetX: number
-  flyTargetY: number
+  start: THREE.Vector3
 }
 
-interface BirdObj {
-  container: Container
-  frameA: Graphics
-  frameB: Graphics
+interface ButterflyObj {
+  group: THREE.Group
+  wingL: THREE.Group
+  wingR: THREE.Group
   phase: number
   speed: number
   centerX: number
   centerY: number
+  centerZ: number
   radiusX: number
   radiusY: number
   flapPhase: number
 }
 
 interface LeafObj {
-  sprite: Graphics
+  mesh: THREE.Mesh
   x: number
   y: number
+  z: number
   vx: number
   vy: number
-  rot: number
   rotSpeed: number
+  phase: number
 }
 
-interface SparkleObj {
-  g: Graphics
-  x: number
-  y: number
-  vx: number
-  vy: number
-  life: number
-  maxLife: number
-}
-
-// ── Drifting cloud cluster (multiple 2.png sprites grouped together) ──
-interface CloudClusterObj {
-  container: Container
+interface CloudObj {
+  group: THREE.Group
   speed: number
-  startX: number
 }
 
-let clouds: CloudClusterObj[] = []
-
-let sunOrbs: SunOrbObj[] = []
-let birds: BirdObj[] = []
-let leaves: LeafObj[] = []
-let sparkles: SparkleObj[] = []
-
-// Flowers for swaying animation
 interface FlowerObj {
-  container: Container
+  group: THREE.Group
   phase: number
   speed: number
 }
+
+let clouds: CloudObj[] = []
+let sunOrbs: SunOrbObj[] = []
+let butterflies: ButterflyObj[] = []
+let leaves: LeafObj[] = []
 let flowers: FlowerObj[] = []
 
 // Tree parts
-let treeContainer: Container | null = null
-let treeGlow: Graphics | null = null
-interface AppleObj { sprite: Graphics; baseY: number; phase: number }
+let treeGroup: THREE.Group | null = null
+let canopyGlowMat: THREE.MeshBasicMaterial | null = null
+let canopyGlow: THREE.Mesh | null = null
+interface AppleObj { group: THREE.Group; baseY: number; phase: number; popT: number }
 let treeApples: AppleObj[] = []
-let sunRayContainer: Container | null = null
+let sunSprite: THREE.Sprite | null = null
+let shakeT = -1            // 树干剧烈摇晃剩余时间（<0 表示未在摇晃）
+let glowFlashT = -1        // 树冠光晕闪烁剩余时间（收集阳光到达时触发）
+const pointerNdc = { x: 0, y: 0 }   // 指针视差
+const raycaster = new THREE.Raycaster()
+const downPos = { x: 0, y: 0 }
 let sceneWidth = 800
 
 // ── UI state (Vue overlays) ──
 const showGrowAnim = ref(false)
 const growMessage = ref('')
-const shakeTree = ref(false)
 const collectMessage = ref('')
 
 function clickTree() {
   if (!userStore.canGrowApple) {
-    shakeTree.value = true
-    setTimeout(() => { shakeTree.value = false }, 500)
+    triggerShake()
     growMessage.value = `还需要 ${userStore.sunlightPerApple - userStore.sunlightPoints} 阳光才能种出 1 个苹果`
     setTimeout(() => { growMessage.value = '' }, 2500)
     return
   }
 
-  shakeTree.value = true
-  setTimeout(() => { shakeTree.value = false }, 500)
+  triggerShake()
 
   const ok = userStore.growApple()
   if (ok) {
     showGrowAnim.value = true
     growMessage.value = `🍎 种出了 1 个苹果！当前共有 ${userStore.apples} 个苹果`
-    spawnSparkles()
     setTimeout(() => {
       showGrowAnim.value = false
       growMessage.value = ''
@@ -216,543 +202,761 @@ const redeemHistory = computed(() =>
 )
 
 // ══════════════════════════════════════════════════════════════
-//  PixiJS Scene — vector illustration rendered entirely with Graphics
+//  Three.js 场景 — 漫画卡通渲染（MeshToonMaterial + 描边壳），全部程序化建模
 // ══════════════════════════════════════════════════════════════
 
-// ── Hand-drawn Pixi scene primitives ──
-// Keeping every illustration vector-based gives the scene a crisp, cohesive look
-// at every screen width without relying on a collage of image assets.
-function sunShape(radius: number, color = '#ffd54f') {
-  return new Graphics().circle(0, 0, radius).fill(color).circle(-radius * .28, -radius * .28, radius * .22).fill('#fff7bd')
+// ── 卡通材质工具 ──
+// 天空用容器 CSS 渐变，renderer 透明；物体用 3 阶梯度 Toon 平涂 + BackSide 描边壳
+const OUTLINE_CSS = '#3a3335'
+let toonGradientMap: THREE.DataTexture | null = null
+function getToonGradientMap() {
+  if (!toonGradientMap) {
+    const data = new Uint8Array([90, 0, 0, 255, 170, 0, 0, 255, 255, 0, 0, 255])
+    toonGradientMap = new THREE.DataTexture(data, 3, 1, THREE.RGBAFormat)
+    toonGradientMap.minFilter = THREE.NearestFilter
+    toonGradientMap.magFilter = THREE.NearestFilter
+    toonGradientMap.needsUpdate = true
+  }
+  return toonGradientMap
 }
-function appleShape(color: string) {
-  const g = new Graphics()
-  g.circle(-7, 2, 11).fill(color).circle(7, 2, 11).fill(color)
-  g.ellipse(3, -13, 6, 3).fill('#48a33b').moveTo(0, -8).lineTo(3, -15).stroke({ width: 2, color: '#75451f' })
+function toonMat(color: number) {
+  return new THREE.MeshToonMaterial({ color, gradientMap: getToonGradientMap() })
+}
+function addOutline(mesh: THREE.Mesh, thickness = 1.06) {
+  const outline = new THREE.Mesh(
+    mesh.geometry,
+    new THREE.MeshBasicMaterial({ color: 0x3a3335, side: THREE.BackSide }),
+  )
+  outline.scale.setScalar(thickness)
+  mesh.add(outline)
+  return outline
+}
+
+// ── 装饰太阳：Canvas 绘制圆盘 + 8 条光芒 + 笑脸，挂在相机上保持视野左上角 ──
+function createSunSprite() {
+  const size = 256
+  const cv = document.createElement('canvas')
+  cv.width = size
+  cv.height = size
+  const ctx = cv.getContext('2d')!
+  const c = size / 2
+  // 8 条光芒
+  ctx.strokeStyle = '#ffd54f'
+  ctx.lineWidth = 12
+  ctx.lineCap = 'round'
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2
+    ctx.beginPath()
+    ctx.moveTo(c + Math.cos(a) * 78, c + Math.sin(a) * 78)
+    ctx.lineTo(c + Math.cos(a) * 112, c + Math.sin(a) * 112)
+    ctx.stroke()
+  }
+  // 光晕
+  const glow = ctx.createRadialGradient(c, c, 40, c, c, 80)
+  glow.addColorStop(0, 'rgba(255,213,79,0.5)')
+  glow.addColorStop(1, 'rgba(255,213,79,0)')
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(c, c, 80, 0, Math.PI * 2)
+  ctx.fill()
+  // 圆盘 + 描边 + 笑脸
+  ctx.fillStyle = '#ffd54f'
+  ctx.strokeStyle = OUTLINE_CSS
+  ctx.lineWidth = 7
+  ctx.beginPath()
+  ctx.arc(c, c, 60, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = OUTLINE_CSS
+  ctx.beginPath()
+  ctx.arc(c - 20, c - 10, 6, 0, Math.PI * 2)
+  ctx.arc(c + 20, c - 10, 6, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = OUTLINE_CSS
+  ctx.lineWidth = 6
+  ctx.beginPath()
+  ctx.arc(c, c + 8, 24, 0.25 * Math.PI, 0.75 * Math.PI)
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(255,138,80,0.55)'
+  ctx.beginPath()
+  ctx.arc(c - 36, c + 10, 9, 0, Math.PI * 2)
+  ctx.arc(c + 36, c + 10, 9, 0, Math.PI * 2)
+  ctx.fill()
+
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
+  const sprite = new THREE.Sprite(mat)
+  sprite.scale.setScalar(3.4)
+  sprite.position.set(-4.2, 2.5, -10)   // 相机坐标系：左上角
+  sprite.renderOrder = 5
+  return sprite
+}
+
+// ── 云朵：多个白色 Toon 球叠加成 Group ──
+function createCloud(scale: number) {
+  const g = new THREE.Group()
+  const mat = toonMat(0xffffff)
+  const geo = new THREE.SphereGeometry(1, 14, 12)
+  const puffs: Array<[number, number, number, number]> = [
+    [0, 0.15, 0, 1], [-1.15, 0, 0, 0.72], [1.2, -0.02, 0, 0.68], [-0.5, 0.55, 0, 0.6], [0.55, 0.5, 0, 0.55],
+  ]
+  for (const [x, y, z, r] of puffs) {
+    const m = new THREE.Mesh(geo, mat)
+    m.position.set(x, y, z)
+    m.scale.setScalar(r)
+    g.add(m)
+  }
+  g.scale.setScalar(scale)
   return g
 }
-function flowerShape() {
-  const g = new Graphics().moveTo(0, 12).lineTo(0, -8).stroke({ width: 2, color: '#44934b' })
-  for (let i = 0; i < 5; i++) g.circle(Math.cos(i * 1.256) * 4, -8 + Math.sin(i * 1.256) * 4, 3).fill('#ff8ab0')
-  return g.circle(0, -8, 3).fill('#ffd54f')
-}
-
-// ── Sky background ──
-function drawSky(container: Container, w: number, h: number) {
-  const g = new Graphics()
-  g.rect(0, 0, w, h).fill('#75c8f3')
-  g.rect(0, h * .46, w, h * .24).fill({ color: '#aee3fa', alpha: .55 })
-  container.addChild(g)
-}
-
-// ── Sun (sprite from 3.png) ──
-function drawSun(container: Container, w: number) {
-  const sun = sunShape(25)
-  sun.x = w - 70
-  sun.y = 55
-  container.addChild(sun)
-
-  // Sun rays (Graphics, for rotation animation)
-  sunRayContainer = new Container()
-  sunRayContainer.x = w - 70
-  sunRayContainer.y = 55
-  container.addChild(sunRayContainer)
-
-  const rayG = new Graphics()
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2
-    const x1 = Math.cos(angle) * 42
-    const y1 = Math.sin(angle) * 42
-    const x2 = Math.cos(angle) * 58
-    const y2 = Math.sin(angle) * 58
-    rayG.moveTo(x1, y1).lineTo(x2, y2).stroke({ width: 3, color: '#ffd54f', alpha: 0.6 })
+function buildClouds() {
+  if (!scene3d) return
+  const specs: Array<[number, number, number, number]> = [
+    [-8, 6.4, -5, 1.1], [-2.5, 7.6, -7, 0.85], [4.5, 6.1, -6, 1.0], [8.5, 7.2, -8, 0.75],
+  ]
+  for (const [x, y, z, s] of specs) {
+    const g = createCloud(s)
+    g.position.set(x, y, z)
+    scene3d.add(g)
+    clouds.push({ group: g, speed: 0.3 + Math.random() * 0.45 })
   }
-  sunRayContainer.addChild(rayG)
 }
 
-// ── Clouds made from overlapping round puffs ---
-function drawClouds(container: Container, w: number, _h: number) {
-  for (let c = 0; c < 5; c++) {
-    const cluster = new Container()
-    const size = 15 + Math.random() * 13
-    const puffs = new Graphics().roundRect(-size * 2, -size * .3, size * 4, size * .9, size).fill({ color: '#fff', alpha: .82 })
-    puffs.circle(-size, -size * .35, size * .8).fill({ color: '#fff', alpha: .82 }).circle(0, -size * .7, size).fill({ color: '#fff', alpha: .82 }).circle(size, -size * .35, size * .75).fill({ color: '#fff', alpha: .82 })
-    cluster.addChild(puffs)
-    cluster.x = Math.random() * (w + 160) - 140
-    cluster.y = 38 + Math.random() * 115
-    container.addChild(cluster)
-    clouds.push({
-      container: cluster,
-      speed: 0.18 + Math.random() * 0.28,
-      startX: cluster.x,
+// ── 草地：扁球绿色圆丘 + 小花（微风摇摆）+ 小树苗 ──
+function buildGround() {
+  if (!scene3d) return
+  const grass = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), toonMat(0x70c85b))
+  grass.scale.set(18, 2.6, 11)
+  grass.position.set(0, -2.55, 1)
+  scene3d.add(grass)
+
+  const flowerSpots: Array<[number, number]> = [[-5.2, 2.2], [-3.8, 3.1], [-6.4, 3.4], [4.6, 2.4], [6.0, 3.2], [3.4, 3.6]]
+  const stemGeo = new THREE.CylinderGeometry(0.03, 0.04, 0.5, 6)
+  const petalGeo = new THREE.SphereGeometry(0.11, 8, 8)
+  const centerGeo = new THREE.SphereGeometry(0.1, 8, 8)
+  for (let i = 0; i < flowerSpots.length; i++) {
+    const g = new THREE.Group()
+    const stem = new THREE.Mesh(stemGeo, toonMat(0x44934b))
+    stem.position.y = 0.25
+    g.add(stem)
+    const petalMat = toonMat(i % 2 ? 0xff8ab0 : 0xffb74d)
+    for (let p = 0; p < 5; p++) {
+      const a = (p / 5) * Math.PI * 2
+      const petal = new THREE.Mesh(petalGeo, petalMat)
+      petal.position.set(Math.cos(a) * 0.15, 0.55, Math.sin(a) * 0.15)
+      g.add(petal)
+    }
+    const center = new THREE.Mesh(centerGeo, toonMat(0xffd54f))
+    center.position.y = 0.55
+    g.add(center)
+    g.position.set(flowerSpots[i][0], 0.02, flowerSpots[i][1])
+    g.rotation.y = Math.random() * Math.PI * 2
+    scene3d.add(g)
+    flowers.push({ group: g, phase: Math.random() * Math.PI * 2, speed: 1.6 + Math.random() })
+  }
+
+  const saplingSpots: Array<[number, number]> = [[-7.6, 1.2], [7.2, 1.6]]
+  for (const [x, z] of saplingSpots) {
+    const g = new THREE.Group()
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 1.1, 8), toonMat(0x8d5a32))
+    trunk.position.y = 0.55
+    g.add(trunk)
+    const c1 = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), toonMat(0x53ad4a))
+    c1.position.set(-0.18, 1.25, 0)
+    const c2 = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 10), toonMat(0x62bc52))
+    c2.position.set(0.2, 1.45, 0.05)
+    const c3 = new THREE.Mesh(new THREE.SphereGeometry(0.38, 12, 10), toonMat(0x75c95e))
+    c3.position.set(0, 1.8, -0.1)
+    g.add(c1, c2, c3)
+    g.position.set(x, 0, z)
+    scene3d.add(g)
+  }
+}
+
+// ── 苹果树：粗壮树干 + 球体树冠 + 可种苹果时的金色光晕壳 ──
+function buildTree() {
+  if (!scene3d) return
+  treeGroup = new THREE.Group()
+
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.62, 3.1, 12), toonMat(0x8d5a32))
+  trunk.position.y = 1.55
+  addOutline(trunk, 1.05)
+  treeGroup.add(trunk)
+
+  // 分叉树枝
+  const branchGeo = new THREE.CylinderGeometry(0.09, 0.16, 1.3, 8)
+  const bl = new THREE.Mesh(branchGeo, toonMat(0x8d5a32))
+  bl.position.set(-0.55, 2.6, 0.1)
+  bl.rotation.z = 0.7
+  const br = new THREE.Mesh(branchGeo, toonMat(0x8d5a32))
+  br.position.set(0.55, 2.75, -0.1)
+  br.rotation.z = -0.7
+  treeGroup.add(bl, br)
+
+  // 树冠：多个绿色 Toon 球错落叠加
+  const darkMat = toonMat(0x3e9e4e)
+  const lightMat = toonMat(0x62bc57)
+  const canopySpecs: Array<[number, number, number, number, boolean]> = [
+    [0, 4.5, 0, 1.75, false], [-1.5, 3.9, 0.4, 1.25, true], [1.55, 3.95, 0.3, 1.2, false],
+    [-0.8, 5.35, -0.3, 1.05, true], [0.9, 5.25, -0.4, 1.0, false], [0.1, 3.7, 1.15, 1.0, true],
+  ]
+  const canopyGeo = new THREE.SphereGeometry(1, 18, 14)
+  for (const [x, y, z, r, light] of canopySpecs) {
+    const m = new THREE.Mesh(canopyGeo, light ? lightMat : darkMat)
+    m.position.set(x, y, z)
+    m.scale.setScalar(r)
+    addOutline(m, 1.04)
+    treeGroup.add(m)
+  }
+
+  // 金色光晕壳（可种苹果时呼吸脉冲）
+  canopyGlowMat = new THREE.MeshBasicMaterial({
+    color: 0xffeb3b, transparent: true, opacity: 0, depthWrite: false, side: THREE.FrontSide,
+  })
+  canopyGlow = new THREE.Mesh(new THREE.SphereGeometry(3.05, 20, 16), canopyGlowMat)
+  canopyGlow.position.set(0, 4.5, 0)
+  canopyGlow.visible = false
+  treeGroup.add(canopyGlow)
+
+  treeGroup.position.set(0, 0, 0)
+  scene3d.add(treeGroup)
+
+  // 树底阴影（贴在草地上）
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(2.3, 24),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.13, depthWrite: false }),
+  )
+  shadow.rotation.x = -Math.PI / 2
+  shadow.position.set(0, 0.03, 0.3)
+  scene3d.add(shadow)
+}
+
+// ── 树冠上的苹果（最多 8 个，红/金/青三色变体）──
+const APPLE_POINTS: Array<[number, number, number]> = [
+  [-1.15, 3.55, 1.15], [1.25, 3.45, 1.0], [-0.3, 4.5, 1.45], [1.7, 4.3, 0.5],
+  [-1.75, 4.35, 0.45], [0.5, 5.15, 1.1], [-0.6, 3.3, 1.5], [0.95, 3.8, -1.25],
+]
+const APPLE_COLORS = [0xe53935, 0xf5a623, 0x5dbca9]
+
+function buildApples() {
+  if (!treeGroup) return
+  // 移除旧苹果
+  for (const a of treeApples) {
+    treeGroup.remove(a.group)
+    a.group.traverse((o) => {
+      const m = o as THREE.Mesh
+      if (m.isMesh) {
+        m.geometry.dispose()
+        const mat = m.material as THREE.Material
+        mat.dispose()
+      }
     })
   }
-}
-
-// ── Grassland (ground strip 13.png only, no green fill) ──
-function drawGrassland(container: Container, w: number, h: number) {
-  const groundY = h * 0.55
-  container.addChild(new Graphics().rect(0, groundY, w, h - groundY).fill('#70c85b').rect(0, groundY, w, 14).fill('#8cda64'))
-
-  // Flowers (sprites from 6.png) - swaying in wind
-  const flowerXs = [0.05, 0.14, 0.8, 0.9, 0.04, 0.93]
-  for (let i = 0; i < flowerXs.length; i++) {
-    const fc = new Container()
-    const fs = flowerShape()
-    fc.addChild(fs)
-    fc.x = flowerXs[i] * w
-    fc.y = h - 8 - (i % 2) * 15
-    // Pivot at bottom center so flower sways from ground
-    fc.pivot.set(0, 0)
-    container.addChild(fc)
-    // Store for animation
-    flowers.push({ container: fc, phase: Math.random() * Math.PI * 2, speed: 0.03 + Math.random() * 0.02 })
-  }
-
-  // Small code-drawn saplings at the edges
-  for (const sx of [0.1, 0.88]) {
-    const ss = new Graphics().moveTo(0, 0).lineTo(0, -34).stroke({ width: 4, color: '#694529' })
-    ss.circle(-8, -28, 10).fill('#53ad4a').circle(8, -30, 12).fill('#62bc52').circle(0, -42, 11).fill('#75c95e')
-    ss.x = sx * w; ss.y = h - 7
-    container.addChild(ss)
-  }
-}
-
-// ── Apple Tree (sprite 9.png, large, base embedded in grass) ──
-function drawTree(container: Container, w: number, h: number) {
-  treeContainer = new Container()
-
-  // Tree glow (when ready to grow apple)
-  treeGlow = new Graphics()
-  // 用双层圆近似径向渐变光晕：外层柔和、内层更亮
-  treeGlow.circle(0, -180, 160).fill({ color: '#ffeb3b', alpha: 0.08 })
-  treeGlow.circle(0, -180, 100).fill({ color: '#ffeb3b', alpha: 0.2 })
-  treeGlow.visible = false
-  treeContainer.addChild(treeGlow)
-
-  const tree = new Graphics()
-  tree.moveTo(-27, 0).bezierCurveTo(-38, -80, -18, -120, -56, -180).lineTo(-24, -181).lineTo(-6, -116).lineTo(13, -210).lineTo(38, -204).bezierCurveTo(14, -122, 38, -70, 28, 0).closePath().fill('#8d5a32')
-  tree.moveTo(-13, -5).lineTo(0, -180).lineTo(14, -8).fill('#b77a42')
-  const canopy = [[-72,-210,55],[-20,-252,64],[42,-226,58],[-58,-282,49],[18,-302,56],[74,-276,43]]
-  for (const [x, y, r] of canopy) tree.circle(x, y, r).fill('#3e9e4e').circle(x - 5, y - 7, r * .78).fill('#62bc57')
-  treeContainer.addChild(tree)
-
-  // Position: tree base embedded INTO grass
-  treeContainer.x = w / 2
-  treeContainer.y = h * 0.98   // tree very low, base deep in grass
-  container.addChild(treeContainer)
-
-  // Tree shadow on grass
-  const shadow = new Graphics()
-  shadow.ellipse(0, 10, 80, 20).fill({ color: 'rgba(0,0,0,0.15)' })
-  shadow.y = 5
-  treeContainer.addChildAt(shadow, 0)  // add behind tree
-
-  // Enable tree click
-  treeContainer.eventMode = 'static'
-  treeContainer.cursor = 'pointer'
-  treeContainer.on('pointerdown', () => clickTree())
-}
-
-// ── Apples on tree (sprites from 1.png, 7.png, 7(2).png) ──
-function drawApplesOnTree() {
-  if (!treeContainer) return
-  // Remove old apples
-  for (const a of treeApples) {
-    treeContainer.removeChild(a.sprite)
-    a.sprite.destroy()
-  }
+  const prevCount = treeApples.length
   treeApples = []
 
   const count = Math.min(userStore.apples, 8)
   if (count === 0) return
 
-  // Positions relative to tree container (tree sprite is 512×512, scale 0.72, anchored bottom-center)
-  // Canopy area: roughly x: -120~120, y: -300~-150
-  const positions = [
-    { x: -60, y: -200 }, { x: 45, y: -180 }, { x: -20, y: -245 },
-    { x: 65, y: -215 }, { x: -70, y: -230 }, { x: 20, y: -275 },
-    { x: 0, y: -155 }, { x: -85, y: -180 },
-  ]
-
   for (let i = 0; i < count; i++) {
-    const pos = positions[i]
-    // Cycle through apple variants
-    const colors = ['#e53935', '#f5a623', '#5dbca9']
-    const s = appleShape(colors[i % colors.length])
-    s.x = pos.x
-    s.y = pos.y
-    s.scale.set(.8)
-    treeContainer.addChild(s)
-    treeApples.push({ sprite: s, baseY: pos.y, phase: i * 1.4 })
+    const [x, y, z] = APPLE_POINTS[i]
+    const g = new THREE.Group()
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 12), toonMat(APPLE_COLORS[i % 3]))
+    body.scale.set(1, 0.92, 1)
+    addOutline(body, 1.08)
+    g.add(body)
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.035, 0.2, 6), toonMat(0x75451f))
+    stem.position.y = 0.32
+    g.add(stem)
+    const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), toonMat(0x48a33b))
+    leaf.scale.set(1.5, 0.45, 0.8)
+    leaf.position.set(0.14, 0.34, 0)
+    leaf.rotation.z = -0.4
+    g.add(leaf)
+
+    g.position.set(x, y, z)
+    // 新种出的苹果做弹入动画（0 → 1.2 → 1 回弹）
+    const isNew = i >= prevCount
+    g.scale.setScalar(isNew ? 0.01 : 1)
+    treeGroup.add(g)
+    treeApples.push({ group: g, baseY: y, phase: i * 1.4, popT: isNew ? 0 : 1 })
   }
 }
 
-// ── Sun Orbs (待收集阳光，sprites from 3.png) ──
-function updateOrbs() {
-  if (!app) return
-  const pending = userStore.pendingSunlight
-
-  // Remove orbs no longer in pending (skip flying ones)
-  for (let i = sunOrbs.length - 1; i >= 0; i--) {
-    const orb = sunOrbs[i]
-    if (!orb.flying && !pending.some(p => p.id === orb.pendingId)) {
-      app.stage.removeChild(orb.sprite)
-      if (orb.label) app.stage.removeChild(orb.label)
-      orb.sprite.destroy()
-      if (orb.label) orb.label.destroy()
-      sunOrbs.splice(i, 1)
-    }
-  }
-
-  // Add orbs for new pending items
-  for (const p of pending) {
-    if (sunOrbs.some(o => o.pendingId === p.id)) continue
-    if (sunOrbs.length >= MAX_ORBS) break
-    const orb = createOrb(p.id, p.amount, sunOrbs.length)
-    sunOrbs.push(orb)
-    app.stage.addChild(orb.sprite)
-    if (orb.label) app.stage.addChild(orb.label)
-  }
-}
-
-function createOrb(pendingId: number, amount: number, index: number): SunOrbObj {
-  const col = index % 5
-  const row = Math.floor(index / 5)
-  const baseX = sceneWidth * (0.06 + col * 0.16 + ((row % 2) * 0.08))
-  const baseY = SCENE_HEIGHT * (0.08 + row * 0.12)
-
-  const sprite = sunShape(18)
-  sprite.x = baseX
-  sprite.y = baseY
-  sprite.eventMode = 'static'
-  sprite.cursor = 'pointer'
-  sprite.hitArea = { contains: (x: number, y: number) => Math.abs(x) < 30 && Math.abs(y) < 30 }
-
-  // Amount label
-  const label = new Text({
-    text: `+${amount}`,
-    style: {
-      fontSize: 14,
-      fill: '#e65100',
-      fontWeight: 'bold',
-      stroke: { color: '#ffffff', width: 3 },
-    },
-  })
-  label.anchor.set(0.5)
-  label.x = baseX
-  label.y = baseY
-
-  const orbObj: SunOrbObj = {
-    sprite, label, pendingId, amount, baseX, baseY,
-    phase: Math.random() * Math.PI * 2,
-    flying: false, flyT: 0,
-    flyStartX: 0, flyStartY: 0, flyTargetX: 0, flyTargetY: 0,
-  }
-
-  sprite.on('pointerdown', () => {
-    if (orbObj.flying) return
-    orbObj.flying = true
-    orbObj.flyT = 0
-    orbObj.flyStartX = sprite.x
-    orbObj.flyStartY = sprite.y
-    orbObj.flyTargetX = sceneWidth / 2
-    orbObj.flyTargetY = SCENE_HEIGHT - 200
-    sprite.eventMode = 'none'
-    // 调用 store 收集阳光（乐观更新）
-    userStore.collectSunlight(orbObj.pendingId)
-    // 显示收集提示
-    collectMessage.value = `☀️ 收集了 ${orbObj.amount} 阳光！`
-    setTimeout(() => {
-      collectMessage.value = ''
-    }, 2500)
-  })
-
-  return orbObj
-}
-
-// ── Birds (8.png + 8(2).png as two-frame wing flap) ──
-function spawnBirds(container: Container) {
+// ── 蝴蝶：身体 + 两片扇动翅膀，绕树飞 8 字轨迹 ──
+function buildButterflies() {
+  if (!scene3d) return
+  const wingGeo = new THREE.PlaneGeometry(0.42, 0.3)
+  const bodyGeo = new THREE.CapsuleGeometry(0.05, 0.18, 4, 8)
+  const bodyMat = toonMat(0x3d4258)
+  const wingColors = [0x9275db, 0xff8ab0, 0x64b5f6]
   for (let i = 0; i < 3; i++) {
-    const c = new Container()
-    const frameA = new Graphics().ellipse(-7, -4, 8, 4).fill('#9275db').ellipse(7, -4, 8, 4).fill('#a78bea').circle(0, 0, 2).fill('#3d4258')
-    frameA.visible = true
-    c.addChild(frameA)
-
-    const frameB = new Graphics().ellipse(-5, 0, 4, 9).fill('#9275db').ellipse(5, 0, 4, 9).fill('#a78bea').circle(0, 0, 2).fill('#3d4258')
-    frameB.visible = false
-    c.addChild(frameB)
-
-    container.addChild(c)
-    birds.push({
-      container: c, frameA, frameB,
+    const g = new THREE.Group()
+    const wingMat = new THREE.MeshToonMaterial({
+      color: wingColors[i], gradientMap: getToonGradientMap(), side: THREE.DoubleSide,
+    })
+    const wingL = new THREE.Group()
+    const wl = new THREE.Mesh(wingGeo, wingMat)
+    wl.position.x = -0.21
+    wingL.add(wl)
+    const wingR = new THREE.Group()
+    const wr = new THREE.Mesh(wingGeo, wingMat)
+    wr.position.x = 0.21
+    wingR.add(wr)
+    const body = new THREE.Mesh(bodyGeo, bodyMat)
+    body.rotation.x = Math.PI / 2
+    g.add(wingL, wingR, body)
+    scene3d.add(g)
+    butterflies.push({
+      group: g, wingL, wingR,
       phase: Math.random() * Math.PI * 2,
-      speed: 0.3 + Math.random() * 0.3,
-      centerX: sceneWidth * (0.1 + Math.random() * 0.8),
-      centerY: SCENE_HEIGHT * (0.1 + Math.random() * 0.6),
-      radiusX: 100 + Math.random() * 150,
-      radiusY: 40 + Math.random() * 60,
+      speed: 0.5 + Math.random() * 0.4,
+      centerX: (Math.random() - 0.5) * 5,
+      centerY: 3.2 + Math.random() * 2.2,
+      centerZ: 1.5 + Math.random(),
+      radiusX: 2.2 + Math.random() * 1.6,
+      radiusY: 0.7 + Math.random() * 0.6,
       flapPhase: Math.random() * Math.PI * 2,
     })
   }
 }
 
-// ── Falling leaves (sprites from 6.png, small) ──
-function spawnLeaves(container: Container) {
-  for (let i = 0; i < 5; i++) {
-    const s = new Graphics().ellipse(0, 0, 5, 9).fill(i % 2 ? '#f2a846' : '#4ca653')
-    container.addChild(s)
+// ── 落叶：从树冠飘落，落地后重新生成 ──
+function buildLeaves() {
+  if (!scene3d) return
+  const geo = new THREE.SphereGeometry(0.14, 8, 6)
+  const mats = [toonMat(0xf2a846), toonMat(0x4ca653)]
+  for (let i = 0; i < 4; i++) {
+    const m = new THREE.Mesh(geo, mats[i % 2])
+    m.scale.set(1, 0.25, 0.7)
+    const x = (Math.random() - 0.5) * 3
+    const y = 3 + Math.random() * 2.5
+    const z = 0.5 + Math.random() * 1.5
+    m.position.set(x, y, z)
+    scene3d.add(m)
     leaves.push({
-      sprite: s,
-      x: sceneWidth / 2 + (Math.random() - 0.5) * 120,
-      y: SCENE_HEIGHT * 0.3 + Math.random() * 100,
-      vx: (Math.random() - 0.5) * 0.5,
-      vy: 0.3 + Math.random() * 0.4,
-      rot: Math.random() * Math.PI * 2,
-      rotSpeed: (Math.random() - 0.5) * 0.05,
+      mesh: m, x, y, z,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: -(0.35 + Math.random() * 0.3),
+      rotSpeed: (Math.random() - 0.5) * 3,
+      phase: Math.random() * Math.PI * 2,
     })
   }
 }
 
-// ── Sparkles (Graphics, for apple grow burst) ──
-function spawnSparkles() {
-  if (!app) return
-  const cx = sceneWidth / 2
-  const cy = SCENE_HEIGHT * 0.42   // tree canopy center
-  for (let i = 0; i < 12; i++) {
-    const g = new Graphics()
-    const angle = (i / 12) * Math.PI * 2
-    const size = 3 + Math.random() * 4
-    g.circle(0, 0, size).fill({ color: '#fff176', alpha: 0.9 })
-    g.circle(0, 0, size * 0.5).fill({ color: '#ffffff' })
-    g.x = cx
-    g.y = cy
-    app.stage.addChild(g)
-    sparkles.push({
-      g, x: cx, y: cy,
-      vx: Math.cos(angle) * (2 + Math.random() * 2),
-      vy: Math.sin(angle) * (2 + Math.random() * 2) - 1,
-      life: 0, maxLife: 60,
-    })
-  }
-}
+// ── 可收集太阳精灵（每个 pendingSunlight 一个 3D 精灵）──
+const ORB_TARGET = new THREE.Vector3(0, 4.5, 0.5)   // 树冠中心
 
-// ── Animation ticker ──
-let elapsed = 0
-function update(ticker: Ticker) {
-  const dt = ticker.deltaTime
-  elapsed += dt
+function syncOrbs() {
+  if (!scene3d) return
+  const pending = userStore.pendingSunlight
 
-  // Sun rays rotation
-  if (sunRayContainer) {
-    sunRayContainer.rotation += 0.002 * dt
-  }
-
-  // Clouds drift left→right, wrap around
-  for (const c of clouds) {
-    c.container.x += c.speed * dt
-    // When cluster fully passes right edge, wrap to left
-    if (c.container.x > sceneWidth + 100) {
-      c.container.x = -200
-      c.container.y = 10 + Math.random() * 90  // new random y
+  // 移除已不在 pending 中的精灵（飞行中的让它飞完）
+  for (let i = sunOrbs.length - 1; i >= 0; i--) {
+    const orb = sunOrbs[i]
+    if (!orb.flying && !pending.some(p => p.id === orb.pendingId)) {
+      disposeOrb(orb)
+      sunOrbs.splice(i, 1)
     }
   }
 
-  // Sun orbs: float + fly animation
+  // 为新增 pending 项创建精灵
+  for (const p of pending) {
+    if (sunOrbs.some(o => o.pendingId === p.id)) continue
+    if (sunOrbs.length >= 20) break
+    const orb = createOrb(p.id, p.amount, sunOrbs.length)
+    sunOrbs.push(orb)
+    scene3d.add(orb.group)
+  }
+}
+
+function createOrb(pendingId: number, amount: number, index: number): SunOrbObj {
+  // 树前方空中网格布局（5 列 × 多行）
+  const col = index % 5
+  const row = Math.floor(index / 5)
+  const baseX = -6 + col * 2.8 + (row % 2) * 1.2
+  const baseY = 7.4 - row * 1.5
+
+  const group = new THREE.Group()
+
+  // 金色小球 + 描边
+  const bodyMat = toonMat(0xffd54f)
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.38, 16, 12), bodyMat)
+  const outlineMat = new THREE.MeshBasicMaterial({
+    color: OUTLINE_COLOR_HEX, side: THREE.BackSide, transparent: true, opacity: 1,
+  })
+  const outline = new THREE.Mesh(body.geometry, outlineMat)
+  outline.scale.setScalar(1.1)
+  body.add(outline)
+  group.add(body)
+
+  // 柔和光晕 Sprite
+  const haloMat = new THREE.SpriteMaterial({
+    map: makeHaloTexture(), transparent: true, depthWrite: false, opacity: 0.9,
+  })
+  const halo = new THREE.Sprite(haloMat)
+  halo.scale.setScalar(1.9)
+  group.add(halo)
+
+  // "+10" 文字 Sprite
+  const labelMat = new THREE.SpriteMaterial({
+    map: makeLabelTexture(`+${amount}`), transparent: true, depthWrite: false,
+  })
+  const label = new THREE.Sprite(labelMat)
+  label.scale.set(1.3, 0.65, 1)
+  label.position.y = -0.75
+  group.add(label)
+
+  group.position.set(baseX, baseY, 1.2)
+  group.scale.setScalar(0.9)
+  group.userData.pendingId = pendingId
+
+  return {
+    group, bodyMat, outlineMat, haloMat, labelMat,
+    pendingId, amount, baseX, baseY,
+    phase: Math.random() * Math.PI * 2,
+    flying: false, flyT: 0,
+    start: new THREE.Vector3(baseX, baseY, 1.2),
+  }
+}
+const OUTLINE_COLOR_HEX = 0x3a3335
+
+function makeHaloTexture() {
+  const cv = document.createElement('canvas')
+  cv.width = 128
+  cv.height = 128
+  const ctx = cv.getContext('2d')!
+  const g = ctx.createRadialGradient(64, 64, 8, 64, 64, 62)
+  g.addColorStop(0, 'rgba(255,235,130,0.85)')
+  g.addColorStop(0.5, 'rgba(255,213,79,0.35)')
+  g.addColorStop(1, 'rgba(255,213,79,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 128, 128)
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+function makeLabelTexture(text: string) {
+  const cv = document.createElement('canvas')
+  cv.width = 256
+  cv.height = 128
+  const ctx = cv.getContext('2d')!
+  ctx.font = '900 76px "Comic Sans MS", "PingFang SC", sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = 16
+  ctx.strokeText(text, 128, 68)
+  ctx.fillStyle = '#e65100'
+  ctx.fillText(text, 128, 68)
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+function disposeOrb(orb: SunOrbObj) {
+  scene3d?.remove(orb.group)
+  orb.group.traverse((o) => {
+    const m = o as THREE.Mesh
+    if (m.isMesh) m.geometry.dispose()
+  })
+  orb.bodyMat.dispose()
+  orb.outlineMat.dispose()
+  orb.haloMat.map?.dispose()
+  orb.haloMat.dispose()
+  orb.labelMat.map?.dispose()
+  orb.labelMat.dispose()
+}
+
+// ── 动画循环（单个 rAF + deltaTime 驱动全部动画）──
+let elapsed = 0
+function animate() {
+  rafId = requestAnimationFrame(animate)
+  if (!renderer || !scene3d || !camera || !clock) return
+  const dt = Math.min(clock.getDelta(), 0.05)
+  elapsed += dt
+
+  // 装饰太阳：光芒缓慢旋转
+  if (sunSprite) (sunSprite.material as THREE.SpriteMaterial).rotation += dt * 0.25
+
+  // 相机视差：跟随指针轻微平移
+  camera.position.x += (pointerNdc.x * 1.6 - camera.position.x) * Math.min(1, dt * 3)
+  camera.position.y += (3.4 + pointerNdc.y * 0.9 - camera.position.y) * Math.min(1, dt * 3)
+  camera.lookAt(0, 3.1, 0)
+
+  // 云朵漂移：左→右，越界回绕
+  for (const c of clouds) {
+    c.group.position.x += c.speed * dt
+    if (c.group.position.x > 14) {
+      c.group.position.x = -14
+      c.group.position.y = 5.8 + Math.random() * 2.2
+    }
+  }
+
+  // 太阳精灵：浮动 + 收集飞行
   for (let i = sunOrbs.length - 1; i >= 0; i--) {
     const orb = sunOrbs[i]
     if (orb.flying) {
-      orb.flyT += dt / 60
+      orb.flyT += dt
       const t = Math.min(orb.flyT / 1.2, 1)
       const ease = 1 - Math.pow(1 - t, 3)
-      orb.sprite.x = orb.flyStartX + (orb.flyTargetX - orb.flyStartX) * ease
-      orb.sprite.y = orb.flyStartY + (orb.flyTargetY - orb.flyStartY) * ease
-      orb.sprite.y -= Math.sin(t * Math.PI) * 40
-      orb.sprite.scale.set(1 - t * 0.7)
-      orb.sprite.alpha = 1 - t
-      if (orb.label) {
-        orb.label.x = orb.sprite.x
-        orb.label.y = orb.sprite.y
-        orb.label.alpha = orb.sprite.alpha
-        orb.label.scale.set(1 - t * 0.5)
-      }
+      orb.group.position.lerpVectors(orb.start, ORB_TARGET, ease)
+      orb.group.position.y += Math.sin(t * Math.PI) * 1.2
+      orb.group.scale.setScalar(0.9 * (1 - t))
+      orb.bodyMat.opacity = 1 - t
+      orb.outlineMat.opacity = 1 - t
+      orb.haloMat.opacity = 0.9 * (1 - t)
+      orb.labelMat.opacity = 1 - t
       if (t >= 1) {
-        // 飞行动画结束，销毁精灵
-        app?.stage.removeChild(orb.sprite)
-        if (orb.label) app?.stage.removeChild(orb.label)
-        orb.sprite.destroy()
-        if (orb.label) orb.label.destroy()
+        disposeOrb(orb)
         sunOrbs.splice(i, 1)
+        glowFlashT = 0.45   // 树冠光晕闪一下
       }
     } else {
-      orb.sprite.y = orb.baseY + Math.sin(elapsed * 0.03 + orb.phase) * 8
-      orb.sprite.x = orb.baseX + Math.sin(elapsed * 0.02 + orb.phase * 0.5) * 3
-      if (orb.label) {
-        orb.label.x = orb.sprite.x
-        orb.label.y = orb.sprite.y
-      }
+      orb.group.position.y = orb.baseY + Math.sin(elapsed * 2.4 + orb.phase) * 0.28
+      orb.group.position.x = orb.baseX + Math.sin(elapsed * 1.3 + orb.phase * 0.5) * 0.12
     }
   }
 
-  // Birds: fly in figure-8 + toggle two-frame wing flap
-  for (const b of birds) {
-    b.phase += b.speed * 0.01 * dt
+  // 蝴蝶：8 字轨迹 + 快速扇翅
+  for (const b of butterflies) {
+    b.phase += b.speed * dt
     const px = b.centerX + Math.sin(b.phase) * b.radiusX
     const py = b.centerY + Math.sin(b.phase * 2) * b.radiusY
-    b.container.x = px
-    b.container.y = py
-    // Face direction of travel
-    const nextX = b.centerX + Math.sin(b.phase + 0.01) * b.radiusX
-    b.container.scale.x = nextX > px ? 1 : -1
-    // Wing flap: toggle frame A / B
-    b.flapPhase += 0.18 * dt
-    const showA = Math.sin(b.flapPhase) > 0
-    b.frameA.visible = showA
-    b.frameB.visible = !showA
+    const dir = Math.cos(b.phase) >= 0 ? 1 : -1
+    b.group.position.set(px, py, b.centerZ)
+    b.group.scale.set(dir, 1, 1)
+    b.flapPhase += dt * 16
+    const flap = Math.sin(b.flapPhase) * 0.9
+    b.wingL.rotation.y = flap
+    b.wingR.rotation.y = -flap
   }
 
-  // Falling leaves
+  // 落叶：飘落 + 摆动 + 自转，落地重生
   for (const leaf of leaves) {
-    leaf.x += leaf.vx * dt + Math.sin(elapsed * 0.02 + leaf.rot) * 0.3
     leaf.y += leaf.vy * dt
-    leaf.rot += leaf.rotSpeed * dt
-    leaf.sprite.x = leaf.x
-    leaf.sprite.y = leaf.y
-    leaf.sprite.rotation = leaf.rot
-    if (leaf.y > SCENE_HEIGHT * 0.68) {
-      leaf.y = SCENE_HEIGHT * 0.25
-      leaf.x = sceneWidth / 2 + (Math.random() - 0.5) * 120
-      leaf.vx = (Math.random() - 0.5) * 0.5
+    leaf.x += (leaf.vx + Math.sin(elapsed * 2 + leaf.phase) * 0.35) * dt
+    leaf.mesh.position.set(leaf.x, leaf.y, leaf.z)
+    leaf.mesh.rotation.x += leaf.rotSpeed * dt
+    leaf.mesh.rotation.z += leaf.rotSpeed * 0.7 * dt
+    if (leaf.y < 0.12) {
+      leaf.x = (Math.random() - 0.5) * 3
+      leaf.y = 3.2 + Math.random() * 2.4
+      leaf.z = 0.5 + Math.random() * 1.5
+      leaf.vx = (Math.random() - 0.5) * 0.3
     }
   }
 
-  // Sparkles
-  for (let i = sparkles.length - 1; i >= 0; i--) {
-    const s = sparkles[i]
-    s.life += dt
-    s.x += s.vx * dt * 0.5
-    s.y += s.vy * dt * 0.5
-    s.vy += 0.08 * dt
-    s.g.x = s.x
-    s.g.y = s.y
-    s.g.alpha = 1 - (s.life / s.maxLife)
-    s.g.scale.set(1 - (s.life / s.maxLife) * 0.5)
-    if (s.life >= s.maxLife) {
-      app?.stage.removeChild(s.g)
-      s.g.destroy()
-      sparkles.splice(i, 1)
-    }
-  }
-
-  // Flowers swaying in wind
+  // 小花微风摇摆
   for (const f of flowers) {
-    f.phase += f.speed * dt
-    f.container.rotation = Math.sin(f.phase) * 0.1
+    f.group.rotation.z = Math.sin(elapsed * f.speed + f.phase) * 0.14
   }
 
-  // Tree shake / sway
-  if (treeContainer) {
-    if (shakeTree.value) {
-      treeContainer.rotation = Math.sin(elapsed * 0.4) * 0.04
+  // 树干：持续微摇（0.5°），点击时剧烈摇晃（3°、0.5s 衰减）
+  if (treeGroup) {
+    if (shakeT >= 0) {
+      shakeT = Math.min(shakeT + dt, 0.5)
+      const decay = 1 - shakeT / 0.5
+      treeGroup.rotation.z = Math.sin(shakeT * 38) * 0.052 * decay
+      if (shakeT >= 0.5) {
+        shakeT = -1
+        treeGroup.rotation.z = 0
+      }
     } else {
-      treeContainer.rotation = Math.sin(elapsed * 0.01) * 0.008
+      treeGroup.rotation.z = Math.sin(elapsed * 0.9) * 0.0087
     }
   }
 
-  // Tree glow
-  if (treeGlow) {
-    const shouldGlow = userStore.canGrowApple
-    if (treeGlow.visible !== shouldGlow) treeGlow.visible = shouldGlow
-    if (shouldGlow) {
-      treeGlow.alpha = 0.5 + Math.sin(elapsed * 0.05) * 0.3
-      treeGlow.scale.set(0.95 + Math.sin(elapsed * 0.05) * 0.1)
+  // 树冠金色光晕：可种苹果时呼吸脉冲；收集到达时闪烁
+  if (canopyGlow && canopyGlowMat) {
+    const can = userStore.canGrowApple
+    if (glowFlashT >= 0) glowFlashT -= dt
+    canopyGlow.visible = can || glowFlashT >= 0
+    if (canopyGlow.visible) {
+      const pulse = 0.16 + Math.sin(elapsed * 2.6) * 0.08
+      const flash = glowFlashT >= 0 ? (glowFlashT / 0.45) * 0.4 : 0
+      canopyGlowMat.opacity = pulse + flash
+      canopyGlow.scale.setScalar(1 + Math.sin(elapsed * 2.6) * 0.04)
     }
   }
 
-  // Apples bobbing
-  for (let i = 0; i < treeApples.length; i++) {
-    const apple = treeApples[i]
-    apple.sprite.y = apple.baseY + Math.sin(elapsed * 0.03 + apple.phase) * 3
+  // 苹果：上下浮动 + 新种出弹入动画
+  for (const apple of treeApples) {
+    if (apple.popT < 1) {
+      apple.popT = Math.min(apple.popT + dt / 0.4, 1)
+      const p = apple.popT
+      const s = p < 0.7 ? (p / 0.7) * 1.2 : 1.2 - ((p - 0.7) / 0.3) * 0.2
+      apple.group.scale.setScalar(s)
+    }
+    apple.group.position.y = apple.baseY + Math.sin(elapsed * 2 + apple.phase) * 0.08
   }
+
+  renderer.render(scene3d, camera)
+}
+
+function triggerShake() {
+  shakeT = 0
+}
+
+// ── 指针交互：Raycaster 拾取太阳精灵 / 树干 ──
+function onPointerDown(e: PointerEvent) {
+  downPos.x = e.clientX
+  downPos.y = e.clientY
+}
+
+function onPointerUp(e: PointerEvent) {
+  if (!renderer || !scene3d || !camera || !sceneRef.value) return
+  // 位移过大视为拖拽/滑动，不触发点击
+  if (Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 10) return
+  const rect = sceneRef.value.getBoundingClientRect()
+  const ndc = new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    -((e.clientY - rect.top) / rect.height) * 2 + 1,
+  )
+  raycaster.setFromCamera(ndc, camera)
+
+  // 1. 太阳精灵
+  const orbMeshes: THREE.Object3D[] = []
+  for (const orb of sunOrbs) {
+    if (!orb.flying) orbMeshes.push(orb.group)
+  }
+  if (orbMeshes.length) {
+    const hits = raycaster.intersectObjects(orbMeshes, true)
+    if (hits.length) {
+      let node: THREE.Object3D | null = hits[0].object
+      while (node && node.userData.pendingId === undefined) node = node.parent
+      const orb = sunOrbs.find(o => o.group === node)
+      if (orb && !orb.flying) {
+        orb.flying = true
+        orb.flyT = 0
+        orb.start.copy(orb.group.position)
+        // 调用 store 收集阳光（乐观更新）
+        userStore.collectSunlight(orb.pendingId)
+        collectMessage.value = `☀️ 收集了 ${orb.amount} 阳光！`
+        setTimeout(() => { collectMessage.value = '' }, 2500)
+        return
+      }
+    }
+  }
+
+  // 2. 树干/树冠 → 种苹果
+  if (treeGroup) {
+    const treeHits = raycaster.intersectObject(treeGroup, true)
+    if (treeHits.length) clickTree()
+  }
+}
+
+function onPointerMove(e: PointerEvent) {
+  if (!sceneRef.value) return
+  const rect = sceneRef.value.getBoundingClientRect()
+  pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+  pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
 }
 
 // ── Scene init ──
-async function initScene() {
-  if (!sceneRef.value) return
+function initScene() {
+  const el = sceneRef.value
+  if (!el) return
+  const w = el.clientWidth || 800
+  const h = el.clientHeight || SCENE_HEIGHT
+  sceneWidth = w
 
-  app = new Application()
-  await app.init({
-    width: sceneRef.value.clientWidth,
-    height: SCENE_HEIGHT,
-    backgroundAlpha: 0,
-    antialias: true,
-    resolution: window.devicePixelRatio || 1,
-    autoDensity: true,
-  })
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+  renderer.setSize(w, h)
+  el.appendChild(renderer.domElement)
 
-  sceneRef.value.appendChild(app.canvas)
-  sceneWidth = sceneRef.value.clientWidth
+  scene3d = new THREE.Scene()
+  camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 100)
+  camera.position.set(0, 3.4, 13)
+  camera.lookAt(0, 3.1, 0)
+  scene3d.add(camera)   // 太阳 Sprite 挂在相机上，需要相机在场景图中
 
-  // Draw all scene elements (tree BEFORE grass so grass covers trunk base)
-  drawSky(app.stage, sceneWidth, SCENE_HEIGHT)
-  drawSun(app.stage, sceneWidth)
-  drawClouds(app.stage, sceneWidth, SCENE_HEIGHT)
-  drawTree(app.stage, sceneWidth, SCENE_HEIGHT)
-  drawGrassland(app.stage, sceneWidth, SCENE_HEIGHT)
-  drawApplesOnTree()
-  spawnBirds(app.stage)
-  spawnLeaves(app.stage)
-  updateOrbs()
+  // 光照：半球光 + 平行光（卡通风不开阴影，保低端机性能）
+  scene3d.add(new THREE.HemisphereLight(0xbfe6ff, 0x8dc98f, 1.1))
+  const dir = new THREE.DirectionalLight(0xfff3d6, 1.6)
+  dir.position.set(-5, 9, 7)
+  scene3d.add(dir)
+  scene3d.add(new THREE.AmbientLight(0xffffff, 0.35))
 
-  // Start animation
-  app.ticker.add(update)
+  sunSprite = createSunSprite()
+  camera.add(sunSprite)
+
+  buildClouds()
+  buildGround()
+  buildTree()
+  buildApples()
+  buildButterflies()
+  buildLeaves()
+  syncOrbs()
+
+  el.addEventListener('pointermove', onPointerMove)
+  el.addEventListener('pointerdown', onPointerDown)
+  el.addEventListener('pointerup', onPointerUp)
 
   // Resize handler
   resizeObserver = new ResizeObserver(() => {
-    if (!app || !sceneRef.value) return
+    if (!renderer || !camera || !sceneRef.value) return
     const newW = sceneRef.value.clientWidth
-    if (newW > 0 && Math.abs(newW - sceneWidth) > 1) {
+    const newH = sceneRef.value.clientHeight || SCENE_HEIGHT
+    if (newW > 0 && (Math.abs(newW - sceneWidth) > 1 || Math.abs(newH - h) > 1)) {
       sceneWidth = newW
-      app.renderer.resize(newW, SCENE_HEIGHT)
-      rebuildScene()
+      camera.aspect = newW / newH
+      camera.updateProjectionMatrix()
+      renderer.setSize(newW, newH)
     }
   })
-  resizeObserver.observe(sceneRef.value)
+  resizeObserver.observe(el)
+
+  clock = new THREE.Clock()
+  animate()
 }
 
-function rebuildScene() {
-  if (!app) return
-  for (let i = app.stage.children.length - 1; i >= 0; i--) {
-    const child = app.stage.children[i]
-    app.stage.removeChild(child)
-    child.destroy()
+// ── 销毁：释放 geometry / material / texture，避免 WebGL 上下文泄漏 ──
+function disposeScene() {
+  if (scene3d) {
+    scene3d.traverse((obj) => {
+      const mesh = obj as THREE.Mesh
+      if (mesh.isMesh || (obj as THREE.Sprite).isSprite) {
+        mesh.geometry?.dispose()
+        const mat = (mesh as any).material
+        if (Array.isArray(mat)) {
+          for (const m of mat) { m.map?.dispose(); m.dispose() }
+        } else if (mat) {
+          mat.map?.dispose()
+          mat.dispose()
+        }
+      }
+    })
   }
-  sunOrbs = []
-  // Labels are children of stage, destroyed above
-  birds = []
-  leaves = []
-  sparkles = []
+  toonGradientMap?.dispose()
+  toonGradientMap = null
+  renderer?.dispose()
+  if (renderer && renderer.domElement.parentElement === sceneRef.value) {
+    sceneRef.value.removeChild(renderer.domElement)
+  }
+  renderer = null
+  scene3d = null
+  camera = null
+  clock = null
+  sunSprite = null
+  treeGroup = null
+  canopyGlow = null
+  canopyGlowMat = null
   clouds = []
-  treeApples = []
-  treeContainer = null
-  treeGlow = null
-  sunRayContainer = null
+  sunOrbs = []
+  butterflies = []
+  leaves = []
   flowers = []
-
-  drawSky(app.stage, sceneWidth, SCENE_HEIGHT)
-  drawSun(app.stage, sceneWidth)
-  drawClouds(app.stage, sceneWidth, SCENE_HEIGHT)
-  drawTree(app.stage, sceneWidth, SCENE_HEIGHT)
-  drawGrassland(app.stage, sceneWidth, SCENE_HEIGHT)
-  drawApplesOnTree()
-  spawnBirds(app.stage)
-  spawnLeaves(app.stage)
-  updateOrbs()
+  treeApples = []
 }
 
 // ── Watch store changes ──
-watch(() => userStore.pendingSunlight, () => updateOrbs(), { deep: true })
-watch(() => userStore.apples, () => drawApplesOnTree())
+watch(() => userStore.pendingSunlight, () => syncOrbs(), { deep: true })
+watch(() => userStore.apples, () => buildApples())
 
 // ── Lifecycle ──
 onMounted(() => {
@@ -764,12 +968,16 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  cancelAnimationFrame(rafId)
   resizeObserver?.disconnect()
   resizeObserver = null
-  if (app) {
-    app.destroy(true)
-    app = null
+  const el = sceneRef.value
+  if (el) {
+    el.removeEventListener('pointermove', onPointerMove)
+    el.removeEventListener('pointerdown', onPointerDown)
+    el.removeEventListener('pointerup', onPointerUp)
   }
+  disposeScene()
 })
 </script>
 
@@ -983,6 +1191,8 @@ onUnmounted(() => {
   box-shadow: 0 8px 28px rgba(0,0,0,0.08);
   border: 1px solid var(--line);
   user-select: none;
+  /* 天空：CSS 渐变背景（3D renderer 透明叠加在上方） */
+  background: linear-gradient(180deg, #5dade2 0%, #8ecdec 46%, #cde9f8 70%, #e6f6fd 100%);
 }
 .scene canvas {
   display: block;
