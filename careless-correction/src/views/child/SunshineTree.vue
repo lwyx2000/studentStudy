@@ -39,8 +39,8 @@ interface SunOrbObj {
 
 interface ButterflyObj {
   group: THREE.Group
-  wingL: THREE.Group
-  wingR: THREE.Group
+  flapL: THREE.Group
+  flapR: THREE.Group
   phase: number
   speed: number
   centerX: number
@@ -86,6 +86,8 @@ let canopyGlow: THREE.Mesh | null = null
 interface AppleObj { group: THREE.Group; baseY: number; phase: number; popT: number }
 let treeApples: AppleObj[] = []
 let sunSprite: THREE.Sprite | null = null
+let sunRaySprite: THREE.Sprite | null = null
+let sunGroup: THREE.Group | null = null
 let shakeT = -1            // 树干剧烈摇晃剩余时间（<0 表示未在摇晃）
 let glowFlashT = -1        // 树冠光晕闪烁剩余时间（收集阳光到达时触发）
 const pointerNdc = { x: 0, y: 0 }   // 指针视差
@@ -232,64 +234,99 @@ function addOutline(mesh: THREE.Mesh, thickness = 1.06) {
   return outline
 }
 
-// ── 装饰太阳：Canvas 绘制圆盘 + 8 条光芒 + 笑脸，挂在相机上保持视野左上角 ──
-function createSunSprite() {
+// ── 装饰太阳：圆盘（笑脸，固定不转）+ 光芒（单独 Sprite 旋转），挂相机右上角 ──
+function createSunDiscSprite() {
   const size = 256
   const cv = document.createElement('canvas')
   cv.width = size
   cv.height = size
   const ctx = cv.getContext('2d')!
   const c = size / 2
-  // 8 条光芒
-  ctx.strokeStyle = '#ffd54f'
-  ctx.lineWidth = 12
-  ctx.lineCap = 'round'
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2
-    ctx.beginPath()
-    ctx.moveTo(c + Math.cos(a) * 78, c + Math.sin(a) * 78)
-    ctx.lineTo(c + Math.cos(a) * 112, c + Math.sin(a) * 112)
-    ctx.stroke()
-  }
   // 光晕
-  const glow = ctx.createRadialGradient(c, c, 40, c, c, 80)
-  glow.addColorStop(0, 'rgba(255,213,79,0.5)')
+  const glow = ctx.createRadialGradient(c, c, 50, c, c, 120)
+  glow.addColorStop(0, 'rgba(255,213,79,0.45)')
   glow.addColorStop(1, 'rgba(255,213,79,0)')
   ctx.fillStyle = glow
-  ctx.beginPath()
-  ctx.arc(c, c, 80, 0, Math.PI * 2)
-  ctx.fill()
-  // 圆盘 + 描边 + 笑脸
+  ctx.fillRect(0, 0, size, size)
+  // 圆盘 + 描边
   ctx.fillStyle = '#ffd54f'
   ctx.strokeStyle = OUTLINE_CSS
-  ctx.lineWidth = 7
+  ctx.lineWidth = 9
   ctx.beginPath()
-  ctx.arc(c, c, 60, 0, Math.PI * 2)
+  ctx.arc(c, c, 82, 0, Math.PI * 2)
   ctx.fill()
   ctx.stroke()
+  // 高光
+  ctx.fillStyle = 'rgba(255,247,189,0.75)'
+  ctx.beginPath()
+  ctx.arc(c - 26, c - 30, 20, 0, Math.PI * 2)
+  ctx.fill()
+  // 眼睛（卡通圆眼 + 高光点）
   ctx.fillStyle = OUTLINE_CSS
   ctx.beginPath()
-  ctx.arc(c - 20, c - 10, 6, 0, Math.PI * 2)
-  ctx.arc(c + 20, c - 10, 6, 0, Math.PI * 2)
+  ctx.arc(c - 26, c - 6, 9, 0, Math.PI * 2)
+  ctx.arc(c + 26, c - 6, 9, 0, Math.PI * 2)
   ctx.fill()
+  ctx.fillStyle = '#ffffff'
+  ctx.beginPath()
+  ctx.arc(c - 23, c - 9, 3.2, 0, Math.PI * 2)
+  ctx.arc(c + 29, c - 9, 3.2, 0, Math.PI * 2)
+  ctx.fill()
+  // 微笑
   ctx.strokeStyle = OUTLINE_CSS
-  ctx.lineWidth = 6
+  ctx.lineWidth = 8
+  ctx.lineCap = 'round'
   ctx.beginPath()
-  ctx.arc(c, c + 8, 24, 0.25 * Math.PI, 0.75 * Math.PI)
+  ctx.arc(c, c + 10, 32, 0.28 * Math.PI, 0.72 * Math.PI)
   ctx.stroke()
-  ctx.fillStyle = 'rgba(255,138,80,0.55)'
+  // 腮红
+  ctx.fillStyle = 'rgba(255,138,80,0.5)'
   ctx.beginPath()
-  ctx.arc(c - 36, c + 10, 9, 0, Math.PI * 2)
-  ctx.arc(c + 36, c + 10, 9, 0, Math.PI * 2)
+  ctx.arc(c - 52, c + 16, 12, 0, Math.PI * 2)
+  ctx.arc(c + 52, c + 16, 12, 0, Math.PI * 2)
   ctx.fill()
 
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
   const sprite = new THREE.Sprite(mat)
-  sprite.scale.setScalar(3.4)
-  sprite.position.set(-4.2, 2.5, -10)   // 相机坐标系：左上角
-  sprite.renderOrder = 5
+  sprite.scale.setScalar(3.0)
+  sprite.renderOrder = 7
+  return sprite
+}
+
+// 光芒：8 根内窄外宽的梯形射线，带深色描边，单独 Sprite 只旋转它
+function createSunRaysSprite() {
+  const size = 512
+  const cv = document.createElement('canvas')
+  cv.width = size
+  cv.height = size
+  const ctx = cv.getContext('2d')!
+  const c = size / 2
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2
+    const cos = Math.cos(a)
+    const sin = Math.sin(a)
+    ctx.beginPath()
+    ctx.moveTo(c + cos * 104 - sin * 11, c + sin * 104 + cos * 11)
+    ctx.lineTo(c + cos * 104 + sin * 11, c + sin * 104 - cos * 11)
+    ctx.lineTo(c + cos * 148 + sin * 19, c + sin * 148 - cos * 19)
+    ctx.arc(c + cos * 148, c + sin * 148, 19, a + Math.PI / 2, a - Math.PI / 2, true)
+    ctx.closePath()
+    ctx.fillStyle = '#ffd54f'
+    ctx.fill()
+    ctx.strokeStyle = OUTLINE_CSS
+    ctx.lineWidth = 8
+    ctx.stroke()
+  }
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
+  const sprite = new THREE.Sprite(mat)
+  sprite.scale.setScalar(4.6)
+  sprite.renderOrder = 6
   return sprite
 }
 
@@ -372,6 +409,26 @@ function buildGround() {
     g.position.set(x, 0, z)
     scene3d.add(g)
   }
+
+  // 草丛：三叶锥形小草，散布点缀在草地上
+  const tuftMat = toonMat(0x4fa552)
+  const tufts: Array<[number, number, number]> = [
+    [-2.6, 2.6, 0.9], [2.8, 2.4, 0.8], [-4.4, 1.7, 1.1], [4.9, 1.5, 0.9], [-1.4, 3.4, 0.65], [1.7, 3.2, 0.7],
+  ]
+  const bladeGeo = new THREE.ConeGeometry(0.045, 0.34, 5)
+  for (const [x, z, s] of tufts) {
+    const tuft = new THREE.Group()
+    for (let b = -1; b <= 1; b++) {
+      const blade = new THREE.Mesh(bladeGeo, tuftMat)
+      blade.position.set(b * 0.07, 0.17, 0)
+      blade.rotation.z = -b * 0.32
+      tuft.add(blade)
+    }
+    tuft.position.set(x, 0.02, z)
+    tuft.scale.setScalar(s)
+    tuft.rotation.y = Math.random() * Math.PI * 2
+    scene3d.add(tuft)
+  }
 }
 
 // ── 苹果树：粗壮树干 + 球体树冠 + 可种苹果时的金色光晕壳 ──
@@ -394,6 +451,12 @@ function buildTree() {
   br.rotation.z = -0.7
   treeGroup.add(bl, br)
 
+  // 树干上的卡通树疤（年轮圈）
+  const knot = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.045, 8, 14), toonMat(0x6b4423))
+  knot.position.set(0.2, 1.35, 0.56)
+  knot.rotation.x = 0.25
+  treeGroup.add(knot)
+
   // 树冠：多个绿色 Toon 球错落叠加
   const darkMat = toonMat(0x3e9e4e)
   const lightMat = toonMat(0x62bc57)
@@ -402,11 +465,47 @@ function buildTree() {
     [-0.8, 5.35, -0.3, 1.05, true], [0.9, 5.25, -0.4, 1.0, false], [0.1, 3.7, 1.15, 1.0, true],
   ]
   const canopyGeo = new THREE.SphereGeometry(1, 18, 14)
-  for (const [x, y, z, r, light] of canopySpecs) {
+  for (let ci = 0; ci < canopySpecs.length; ci++) {
+    const [x, y, z, r, light] = canopySpecs[ci]
     const m = new THREE.Mesh(canopyGeo, light ? lightMat : darkMat)
     m.position.set(x, y, z)
     m.scale.setScalar(r)
     addOutline(m, 1.04)
+    // 中间主树冠正前方加卡通表情（漫画风小树脸）
+    if (ci === 0) {
+      const face = new THREE.Group()
+      const eyeWhiteGeo = new THREE.SphereGeometry(0.2, 12, 10)
+      const eyeWhiteMat = toonMat(0xffffff)
+      const pupilGeo = new THREE.SphereGeometry(0.095, 10, 8)
+      const pupilMat = toonMat(0x3a3335)
+      for (const ex of [-0.46, 0.46]) {
+        const ew = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat)
+        ew.position.set(ex, 0.05, 0)
+        ew.scale.set(1, 1.15, 0.5)
+        face.add(ew)
+        const ep = new THREE.Mesh(pupilGeo, pupilMat)
+        ep.position.set(ex + 0.03, 0.02, 0.09)
+        face.add(ep)
+      }
+      // 微笑：圆环弧段
+      const smile = new THREE.Mesh(
+        new THREE.TorusGeometry(0.34, 0.05, 8, 14, Math.PI * 0.85),
+        toonMat(0x3a3335),
+      )
+      smile.rotation.z = Math.PI + (Math.PI - Math.PI * 0.85) / 2
+      smile.position.set(0, -0.36, 0.05)
+      face.add(smile)
+      // 腮红
+      const blushMat = toonMat(0xff9d9d)
+      for (const bx of [-0.85, 0.85]) {
+        const blush = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), blushMat)
+        blush.position.set(bx, -0.22, 0)
+        blush.scale.set(1, 0.6, 0.4)
+        face.add(blush)
+      }
+      face.position.set(0, 0.15, 1.6)
+      m.add(face)
+    }
     treeGroup.add(m)
   }
 
@@ -484,32 +583,148 @@ function buildApples() {
   }
 }
 
-// ── 蝴蝶：身体 + 两片扇动翅膀，绕树飞 8 字轨迹 ──
+// ── 蝴蝶：纹理翅膀（上/下翅 + 斑点描边）+ 头胸腹 + 卷触角，绕树飞 8 字轨迹 ──
+interface WingPalette { main: string; edge: string; spot: string }
+
+function makeWingTexture(pal: WingPalette, lower: boolean, outlineCss: string) {
+  const w = 256
+  const h = 192
+  const cv = document.createElement('canvas')
+  cv.width = w
+  cv.height = h
+  const ctx = cv.getContext('2d')!
+  ctx.lineJoin = 'round'
+  ctx.beginPath()
+  if (!lower) {
+    // 上翅：大扇形，从翅根(左下)向上展开
+    ctx.moveTo(20, 170)
+    ctx.bezierCurveTo(30, 70, 110, 12, 216, 26)
+    ctx.bezierCurveTo(248, 32, 244, 92, 196, 128)
+    ctx.bezierCurveTo(140, 168, 70, 182, 20, 170)
+  } else {
+    // 下翅：小扇形 + 波浪尾缘
+    ctx.moveTo(20, 26)
+    ctx.bezierCurveTo(90, 20, 170, 48, 198, 96)
+    ctx.bezierCurveTo(212, 124, 186, 150, 158, 138)
+    ctx.bezierCurveTo(142, 160, 112, 154, 102, 134)
+    ctx.bezierCurveTo(78, 152, 48, 142, 42, 120)
+    ctx.bezierCurveTo(24, 96, 12, 56, 20, 26)
+  }
+  ctx.closePath()
+  const grad = ctx.createLinearGradient(0, 0, w, h)
+  grad.addColorStop(0, pal.edge)
+  grad.addColorStop(0.55, pal.main)
+  grad.addColorStop(1, pal.edge)
+  ctx.fillStyle = grad
+  ctx.fill()
+  ctx.strokeStyle = outlineCss
+  ctx.lineWidth = 12
+  ctx.stroke()
+  // 斑点装饰
+  ctx.fillStyle = pal.spot
+  if (!lower) {
+    ctx.beginPath()
+    ctx.arc(158, 56, 17, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(104, 96, 11, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+    ctx.lineWidth = 7
+    ctx.beginPath()
+    ctx.moveTo(52, 148)
+    ctx.bezierCurveTo(96, 122, 148, 98, 188, 84)
+    ctx.stroke()
+  } else {
+    ctx.beginPath()
+    ctx.arc(120, 82, 13, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(70, 70, 8, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
 function buildButterflies() {
   if (!scene3d) return
-  const wingGeo = new THREE.PlaneGeometry(0.42, 0.3)
-  const bodyGeo = new THREE.CapsuleGeometry(0.05, 0.18, 4, 8)
-  const bodyMat = toonMat(0x3d4258)
-  const wingColors = [0x9275db, 0xff8ab0, 0x64b5f6]
+  const palettes: WingPalette[] = [
+    { main: '#b39ddb', edge: '#7e57c2', spot: 'rgba(255,255,255,0.92)' },
+    { main: '#ffab91', edge: '#ff7043', spot: 'rgba(255,255,255,0.92)' },
+    { main: '#81d4fa', edge: '#29b6f6', spot: 'rgba(255,255,255,0.92)' },
+  ]
+  const bodyMat = toonMat(0x5d4037)
   for (let i = 0; i < 3; i++) {
     const g = new THREE.Group()
-    const wingMat = new THREE.MeshToonMaterial({
-      color: wingColors[i], gradientMap: getToonGradientMap(), side: THREE.DoubleSide,
-    })
-    const wingL = new THREE.Group()
-    const wl = new THREE.Mesh(wingGeo, wingMat)
-    wl.position.x = -0.21
-    wingL.add(wl)
-    const wingR = new THREE.Group()
-    const wr = new THREE.Mesh(wingGeo, wingMat)
-    wr.position.x = 0.21
-    wingR.add(wr)
-    const body = new THREE.Mesh(bodyGeo, bodyMat)
-    body.rotation.x = Math.PI / 2
-    g.add(wingL, wingR, body)
+    const pal = palettes[i]
+    const upTex = makeWingTexture(pal, false, OUTLINE_CSS)
+    const lowTex = makeWingTexture(pal, true, OUTLINE_CSS)
+
+    const makeFlap = (side: 1 | -1) => {
+      const flap = new THREE.Group()
+      const upMat = new THREE.MeshBasicMaterial({ map: upTex, transparent: true, side: THREE.DoubleSide, depthWrite: false })
+      const up = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.64), upMat)
+      up.position.set(side * 0.42, 0.24, 0)
+      up.scale.x = side
+      up.rotation.z = side * 0.22
+      flap.add(up)
+      const lowMat = new THREE.MeshBasicMaterial({ map: lowTex, transparent: true, side: THREE.DoubleSide, depthWrite: false })
+      const low = new THREE.Mesh(new THREE.PlaneGeometry(0.64, 0.48), lowMat)
+      low.position.set(side * 0.32, -0.2, 0)
+      low.scale.x = side
+      low.rotation.z = -side * 0.28
+      flap.add(low)
+      return flap
+    }
+    const flapL = makeFlap(-1)
+    const flapR = makeFlap(1)
+    g.add(flapL, flapR)
+
+    // 胸 + 腹
+    const chest = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.16, 4, 10), bodyMat)
+    chest.position.set(0, 0.02, 0.02)
+    g.add(chest)
+    const abdomen = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), bodyMat)
+    abdomen.scale.set(0.85, 0.85, 1.7)
+    abdomen.position.set(0, -0.04, -0.2)
+    g.add(abdomen)
+    // 头 + 大眼
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), bodyMat)
+    head.position.set(0, 0.16, 0.14)
+    g.add(head)
+    const eyeGeo = new THREE.SphereGeometry(0.045, 8, 8)
+    const eyeMat = toonMat(0x212121)
+    const hlGeo = new THREE.SphereGeometry(0.016, 6, 6)
+    const hlMat = toonMat(0xffffff)
+    for (const ex of [-0.06, 0.06]) {
+      const eye = new THREE.Mesh(eyeGeo, eyeMat)
+      eye.position.set(ex, 0.19, 0.22)
+      g.add(eye)
+      const hl = new THREE.Mesh(hlGeo, hlMat)
+      hl.position.set(ex + 0.015, 0.205, 0.255)
+      g.add(hl)
+    }
+    // 卷触角（二次贝塞尔细管 + 端点球）
+    const antMat = toonMat(0x3e2723)
+    const tipGeo = new THREE.SphereGeometry(0.03, 6, 6)
+    for (const side of [-1, 1]) {
+      const curve = new THREE.QuadraticBezierCurve3(
+        new THREE.Vector3(side * 0.03, 0.25, 0.14),
+        new THREE.Vector3(side * 0.14, 0.44, 0.16),
+        new THREE.Vector3(side * 0.2, 0.4, 0.02),
+      )
+      g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 8, 0.012, 5, false), antMat))
+      const tip = new THREE.Mesh(tipGeo, antMat)
+      tip.position.set(side * 0.2, 0.4, 0.02)
+      g.add(tip)
+    }
+
+    g.scale.setScalar(0.85)
     scene3d.add(g)
     butterflies.push({
-      group: g, wingL, wingR,
+      group: g, flapL, flapR,
       phase: Math.random() * Math.PI * 2,
       speed: 0.5 + Math.random() * 0.4,
       centerX: (Math.random() - 0.5) * 5,
@@ -522,14 +737,64 @@ function buildButterflies() {
   }
 }
 
-// ── 落叶：从树冠飘落，落地后重新生成 ──
+// ── 落叶：Canvas 叶片贴图（叶脉 + 描边），从树冠飘落，落地后重新生成 ──
+function makeLeafTexture(color: string, vein: string, outlineCss: string) {
+  const cv = document.createElement('canvas')
+  cv.width = 128
+  cv.height = 128
+  const ctx = cv.getContext('2d')!
+  ctx.lineJoin = 'round'
+  // 叶柄
+  ctx.strokeStyle = outlineCss
+  ctx.lineWidth = 8
+  ctx.beginPath()
+  ctx.moveTo(64, 122)
+  ctx.lineTo(64, 100)
+  ctx.stroke()
+  // 叶片
+  ctx.beginPath()
+  ctx.moveTo(64, 104)
+  ctx.bezierCurveTo(14, 88, 12, 30, 64, 8)
+  ctx.bezierCurveTo(116, 30, 114, 88, 64, 104)
+  ctx.closePath()
+  ctx.fillStyle = color
+  ctx.fill()
+  ctx.lineWidth = 9
+  ctx.stroke()
+  // 叶脉
+  ctx.strokeStyle = vein
+  ctx.lineWidth = 5
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(64, 98)
+  ctx.lineTo(64, 22)
+  ctx.moveTo(64, 78)
+  ctx.lineTo(40, 60)
+  ctx.moveTo(64, 78)
+  ctx.lineTo(88, 60)
+  ctx.moveTo(64, 52)
+  ctx.lineTo(46, 38)
+  ctx.moveTo(64, 52)
+  ctx.lineTo(82, 38)
+  ctx.stroke()
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
 function buildLeaves() {
   if (!scene3d) return
-  const geo = new THREE.SphereGeometry(0.14, 8, 6)
-  const mats = [toonMat(0xf2a846), toonMat(0x4ca653)]
+  const leafGeo = new THREE.PlaneGeometry(0.34, 0.34)
+  const variants = [
+    makeLeafTexture('#f2a846', '#c77f2a', OUTLINE_CSS),
+    makeLeafTexture('#66bb6a', '#3e8e41', OUTLINE_CSS),
+    makeLeafTexture('#e57373', '#c04f4f', OUTLINE_CSS),
+  ]
   for (let i = 0; i < 4; i++) {
-    const m = new THREE.Mesh(geo, mats[i % 2])
-    m.scale.set(1, 0.25, 0.7)
+    const mat = new THREE.MeshBasicMaterial({
+      map: variants[i % variants.length], transparent: true, side: THREE.DoubleSide, depthWrite: false,
+    })
+    const m = new THREE.Mesh(leafGeo, mat)
     const x = (Math.random() - 0.5) * 3
     const y = 3 + Math.random() * 2.5
     const z = 0.5 + Math.random() * 1.5
@@ -608,6 +873,11 @@ function createOrb(pendingId: number, amount: number, index: number): SunOrbObj 
   label.position.y = -0.75
   group.add(label)
 
+  // 环绕旋转的橙色光圈
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.035, 8, 28), toonMat(0xffb300))
+  group.add(ring)
+  group.userData.ring = ring
+
   group.position.set(baseX, baseY, 1.2)
   group.scale.setScalar(0.9)
   group.userData.pendingId = pendingId
@@ -679,8 +949,10 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05)
   elapsed += dt
 
-  // 装饰太阳：光芒缓慢旋转
-  if (sunSprite) (sunSprite.material as THREE.SpriteMaterial).rotation += dt * 0.25
+  // 太阳光芒缓慢旋转（只有光芒转，太阳脸不动）
+  if (sunRaySprite) (sunRaySprite.material as THREE.SpriteMaterial).rotation += dt * 0.4
+  // 太阳整体轻微浮动
+  if (sunGroup) sunGroup.position.y = 2.6 + Math.sin(elapsed * 0.8) * 0.08
 
   // 相机视差：跟随指针轻微平移
   camera.position.x += (pointerNdc.x * 1.6 - camera.position.x) * Math.min(1, dt * 3)
@@ -710,6 +982,12 @@ function animate() {
       orb.outlineMat.opacity = 1 - t
       orb.haloMat.opacity = 0.9 * (1 - t)
       orb.labelMat.opacity = 1 - t
+      const flyRing = orb.group.userData.ring as THREE.Mesh | undefined
+      if (flyRing) {
+        const rm = flyRing.material as THREE.MeshToonMaterial
+        rm.transparent = true
+        rm.opacity = 1 - t
+      }
       if (t >= 1) {
         disposeOrb(orb)
         sunOrbs.splice(i, 1)
@@ -718,21 +996,28 @@ function animate() {
     } else {
       orb.group.position.y = orb.baseY + Math.sin(elapsed * 2.4 + orb.phase) * 0.28
       orb.group.position.x = orb.baseX + Math.sin(elapsed * 1.3 + orb.phase * 0.5) * 0.12
+      // 环绕光圈旋转
+      const ring = orb.group.userData.ring as THREE.Mesh | undefined
+      if (ring) {
+        ring.rotation.z += dt * 1.2
+        ring.rotation.x = Math.sin(elapsed * 1.5 + orb.phase) * 0.4
+      }
     }
   }
 
-  // 蝴蝶：8 字轨迹 + 快速扇翅
+  // 蝴蝶：8 字轨迹 + 快速扇翅 + 身体起伏
   for (const b of butterflies) {
     b.phase += b.speed * dt
     const px = b.centerX + Math.sin(b.phase) * b.radiusX
-    const py = b.centerY + Math.sin(b.phase * 2) * b.radiusY
+    const py = b.centerY + Math.sin(b.phase * 2) * b.radiusY + Math.sin(elapsed * 3 + b.flapPhase) * 0.12
     const dir = Math.cos(b.phase) >= 0 ? 1 : -1
     b.group.position.set(px, py, b.centerZ)
     b.group.scale.set(dir, 1, 1)
-    b.flapPhase += dt * 16
-    const flap = Math.sin(b.flapPhase) * 0.9
-    b.wingL.rotation.y = flap
-    b.wingR.rotation.y = -flap
+    b.group.rotation.z = Math.cos(b.phase) * 0.25 * dir
+    b.flapPhase += dt * 13
+    const flap = Math.sin(b.flapPhase) * 0.85
+    b.flapL.rotation.y = flap
+    b.flapR.rotation.y = -flap
   }
 
   // 落叶：飘落 + 摆动 + 自转，落地重生
@@ -878,12 +1163,17 @@ function initScene() {
   // 光照：半球光 + 平行光（卡通风不开阴影，保低端机性能）
   scene3d.add(new THREE.HemisphereLight(0xbfe6ff, 0x8dc98f, 1.1))
   const dir = new THREE.DirectionalLight(0xfff3d6, 1.6)
-  dir.position.set(-5, 9, 7)
+  dir.position.set(6, 9, 7)   // 主光来自右上，与太阳位置一致
   scene3d.add(dir)
   scene3d.add(new THREE.AmbientLight(0xffffff, 0.35))
 
-  sunSprite = createSunSprite()
-  camera.add(sunSprite)
+  sunGroup = new THREE.Group()
+  sunGroup.position.set(4.4, 2.6, -10)   // 相机坐标系：右上角
+  sunRaySprite = createSunRaysSprite()
+  sunSprite = createSunDiscSprite()
+  sunGroup.add(sunRaySprite, sunSprite)
+  sunGroup.renderOrder = 5
+  camera.add(sunGroup)
 
   buildClouds()
   buildGround()
@@ -943,6 +1233,8 @@ function disposeScene() {
   camera = null
   clock = null
   sunSprite = null
+  sunRaySprite = null
+  sunGroup = null
   treeGroup = null
   canopyGlow = null
   canopyGlowMat = null
@@ -1191,8 +1483,10 @@ onUnmounted(() => {
   box-shadow: 0 8px 28px rgba(0,0,0,0.08);
   border: 1px solid var(--line);
   user-select: none;
-  /* 天空：CSS 渐变背景（3D renderer 透明叠加在上方） */
-  background: linear-gradient(180deg, #5dade2 0%, #8ecdec 46%, #cde9f8 70%, #e6f6fd 100%);
+  /* 天空：CSS 渐变背景（3D renderer 透明叠加在上方）+ 中心提亮四周暗角的漫画 vignette */
+  background:
+    radial-gradient(120% 100% at 50% 42%, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0) 45%, rgba(40,70,110,0.12) 100%),
+    linear-gradient(180deg, #5dade2 0%, #8ecdec 46%, #cde9f8 70%, #e6f6fd 100%);
 }
 .scene canvas {
   display: block;
