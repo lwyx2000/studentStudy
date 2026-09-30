@@ -146,6 +146,10 @@ const submittedKey = `cc-checklist-submitted-${activeDate}`
 const submitted = ref<boolean>(localStorage.getItem(submittedKey) === 'true')
 const submitting = ref(false)
 const submitMessage = ref('')
+// 追踪已提交的小任务 ID（多次提交场景）
+const submittedItemIds = ref<Set<string>>(new Set())
+const submitCount = ref(0)
+const cumulativePoints = ref(0)
 
 // ── 打卡审批状态（从后端拉取，展示驳回原因/通过横幅）──
 interface CheckinStatusInfo {
@@ -220,9 +224,10 @@ const allRequiredDone = computed(() =>
 )
 
 async function submitChecklist() {
-  if (submitted.value || submitting.value) return
-  if (checkedRequiredItems.value.length === 0) {
-    submitMessage.value = '请先勾选至少一项必做任务再提交（可选 ⭐ 项不完成也没关系）'
+  if (submitting.value) return
+  // 至少勾选一项（必做或可选均可）才能提交
+  if (checkedTaskItems.value.length === 0 && checkedHabitSteps.value.length === 0) {
+    submitMessage.value = '请先勾选至少一项任务或习惯步骤再提交'
     return
   }
   submitting.value = true
@@ -258,12 +263,21 @@ async function submitChecklist() {
   const done = taskStore.todayTasks.filter(t => t.status === 'completed').length
   growthStore.recordDataPoint({ taskCompletionRate: done / Math.max(taskStore.todayTasks.length, 1) })
 
-  // Submit check-in to backend for parent approval
+  // 记录本次提交的小任务 ID
+  for (const item of checkedTaskItems.value) {
+    submittedItemIds.value.add(item.id)
+  }
+
+  // 更新提交统计
+  submitCount.value += 1
+  cumulativePoints.value += totalPoints
   submitted.value = true
   submitting.value = false
   localStorage.setItem(submittedKey, 'true')
-  localStorage.setItem(`cc-checklist-points-${activeDate}`, String(totalPoints))
+  localStorage.setItem(`cc-checklist-count-${activeDate}`, String(submitCount.value))
+  localStorage.setItem(`cc-checklist-cumulative-${activeDate}`, String(cumulativePoints.value))
 
+  // Submit check-in to backend for parent approval
   if (totalPoints > 0) {
     api.checkins.submit({
       checkDate: activeDate,
@@ -285,9 +299,9 @@ async function submitChecklist() {
       if (optionalBonusPoints.value > 0) extras.push(`可选 ⭐ 加分 +${optionalBonusPoints.value}`)
       if (habitPoints.value > 0) extras.push(`习惯打卡 +${habitPoints.value}`)
       const extraText = extras.length ? `（含 ${extras.join(' · ')}）` : ''
-      submitMessage.value = `已提交打卡，等待家长审批 🕐 ${extraText}通过后将获得 ${totalPoints} 阳光值`
+      submitMessage.value = `第 ${submitCount.value} 次打卡已提交，累计 ${cumulativePoints.value} 阳光值 ${extraText}等待家长审批 🕐`
     }).catch(() => {
-      submitMessage.value = `打卡已记录！等待家长审批后获得 ${totalPoints} 阳光值 🕐`
+      submitMessage.value = `打卡已记录！等待家长审批后获得 ${cumulativePoints.value} 阳光值 🕐`
     })
   } else {
     submitMessage.value = '继续保持！'
@@ -385,12 +399,10 @@ const categoryOptions: { value: TaskCategory; label: string }[] = [
 const userName = computed(() => userStore.profile.name || '我的')
 
 function resetTodayChecklist() {
+  // 仅清空当前勾选状态，保留提交记录（多次提交场景）
   checkState.value = {}
-  submitted.value = false
   submitMessage.value = ''
   saveCheckState()
-  localStorage.removeItem(submittedKey)
-  localStorage.removeItem(`cc-checklist-points-${activeDate}`)
 }
 
 function backToDashboard() {
@@ -517,6 +529,11 @@ onMounted(async () => {
                         class="ptr-sub-badge"
                         style="background:#fff8d9;color:#8a6d3b;font-weight:800"
                       >⭐ 可选</span>
+                      <span
+                        v-if="submittedItemIds.has(item.id)"
+                        class="ptr-sub-badge"
+                        style="background:#e8f5e9;color:#2e7d32;font-weight:800"
+                      >已提交</span>
                     </div>
                   </div>
                   <span class="ptr-check touch-check" :class="{ checked: isTaskItemChecked(item.id) }">
@@ -556,21 +573,21 @@ onMounted(async () => {
 
         <!-- Submit Section (only for today) -->
         <div v-if="isToday" class="submit-section">
-          <div v-if="submitMessage" class="submit-message" :class="{ 'submit-error': !submitted }">
+          <div v-if="submitMessage" class="submit-message" :class="{ 'submit-error': submitMessage.includes('请先') }">
             {{ submitMessage }}
           </div>
           <button
-            v-if="!submitted"
             class="btn submit-btn"
-            :disabled="submitting || completedCount === 0"
+            :disabled="submitting || (checkedTaskItems.length === 0 && checkedHabitSteps.length === 0)"
             @click="submitChecklist"
           >
-            {{ submitting ? '⏳ 提交中...' : `✅ 提交打卡（必做 ${checkedRequiredItems.length}/${totalCount}${checkedOptionalItems.length ? ` · ⭐ ${checkedOptionalItems.length}` : ''}${checkedHabitSteps.length ? ` · 🌱 ${checkedHabitSteps.length} 步` : ''}）` }}
+            {{ submitting ? '⏳ 提交中...' : (submitCount > 0 ? `✅ 再提交一次（累计 ${cumulativePoints} 阳光）` : `✅ 提交打卡（必做 ${checkedRequiredItems.length}/${totalCount}${checkedOptionalItems.length ? ` · ⭐ ${checkedOptionalItems.length}` : ''}${checkedHabitSteps.length ? ` · 🌱 ${checkedHabitSteps.length} 步` : ''}）`) }}
           </button>
-          <div v-else class="submitted-badge">
-            <span>✅ 今日已打卡</span>
-            <button class="btn ghost reset-btn" @click="resetTodayChecklist">重置今日打卡</button>
-          </div>
+          <button
+            v-if="submitted"
+            class="btn ghost reset-btn"
+            @click="resetTodayChecklist"
+          >清空当前勾选</button>
         </div>
 
         <!-- Edit mode notice (for past dates) -->
