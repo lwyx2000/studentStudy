@@ -25,7 +25,7 @@ async function loadChildData() {
     childSunlight.value = balance
   } catch { /* offline */ }
   try {
-    const res = await api.points.getHistory(childId)
+    const res = await api.points.getHistory(childId, sunHistoryOffset.value, sunHistoryLimit)
     const raw: any[] = res.history ?? []
     childSunlightHistory.value = raw.map((r: any) => ({
       id: String(r.pk_sunlight_history ?? r.id ?? ''),
@@ -34,9 +34,10 @@ async function loadChildData() {
       type: r.type ?? 'earn',
       timestamp: r.created_at ?? r.timestamp ?? new Date().toISOString(),
     }))
+    sunHistoryTotal.value = res.total ?? 0
   } catch { /* offline */ }
   try {
-    const res = await api.points.getApples(childId)
+    const res = await api.points.getApples(childId, appleHistoryOffset.value, appleHistoryLimit)
     childApples.value = res.apples
     childSunlight.value = res.sunlightPoints
     const rawHistory: any[] = res.history ?? []
@@ -47,6 +48,7 @@ async function loadChildData() {
       type: h.type ?? 'grow',
       timestamp: h.created_at ?? h.timestamp ?? new Date().toISOString(),
     }))
+    appleHistoryTotal.value = res.total ?? 0
   } catch { /* offline */ }
   try {
     await userStore.fetchFromApi(childId)
@@ -100,7 +102,57 @@ async function submitAward() {
   awardLoading.value = false
 }
 
-// ── Apple management ──
+// ── Apple history pagination ──
+const appleHistoryOffset = ref(0)
+const appleHistoryLimit = 20
+const appleHistoryTotal = ref(0)
+const appleHistoryPage = computed(() => Math.floor(appleHistoryOffset.value / appleHistoryLimit) + 1)
+const appleHistoryTotalPages = computed(() => Math.max(1, Math.ceil(appleHistoryTotal.value / appleHistoryLimit)))
+
+// ── Sun history pagination ──
+const sunHistoryOffset = ref(0)
+const sunHistoryLimit = 20
+const sunHistoryTotal = ref(0)
+const sunHistoryPage = computed(() => Math.floor(sunHistoryOffset.value / sunHistoryLimit) + 1)
+const sunHistoryTotalPages = computed(() => Math.max(1, Math.ceil(sunHistoryTotal.value / sunHistoryLimit)))
+
+// ── Manual apple adjust ──
+const appleAdjustAmount = ref(1)
+const appleAdjustReason = ref('')
+const appleAdjustLoading = ref(false)
+const appleAdjustSuccess = ref('')
+const appleQuickReasons = [
+  { label: '🎁 奖励', amount: 1 },
+  { label: '🎁 大奖', amount: 3 },
+  { label: '⚠️ 撒谎', amount: -1 },
+  { label: '⚠️ 打架', amount: -2 },
+]
+
+function applyAppleQuickReason(qr: { label: string; amount: number }) {
+  appleAdjustAmount.value = qr.amount
+  appleAdjustReason.value = qr.label
+}
+
+async function submitAppleAdjust() {
+  if (!appleAdjustAmount.value || appleAdjustAmount.value === 0 || !childSelectStore.selectedChildId) return
+  appleAdjustLoading.value = true
+  appleAdjustSuccess.value = ''
+  try {
+    const reason = appleAdjustReason.value || (appleAdjustAmount.value > 0 ? '家长手动奖励苹果' : '家长手动扣除苹果')
+    await api.points.awardApple(appleAdjustAmount.value, reason, childSelectStore.selectedChildId)
+    appleAdjustSuccess.value = `${appleAdjustAmount.value > 0 ? '发放' : '扣除'} ${Math.abs(appleAdjustAmount.value)} 个苹果成功 ✅`
+    appleAdjustReason.value = ''
+    appleAdjustAmount.value = 1
+    await loadChildData()
+    setTimeout(() => { appleAdjustSuccess.value = '' }, 3000)
+  } catch (e: any) {
+    alert(e.message || '操作失败')
+  } finally {
+    appleAdjustLoading.value = false
+  }
+}
+
+// ── Apple redeem (家长代兑) ──
 const redeemCount = ref(1)
 const redeemReason = ref('')
 const redeemLoading = ref(false)
@@ -162,6 +214,20 @@ async function rejectRedemption(id: number) {
     await loadRedemptionRequests()
   } catch (e: any) {
     alert(e.message || '操作失败')
+  }
+}
+
+// ── Pagination helpers ──
+function goSunHistoryPage(page: number) {
+  if (page >= 1 && page <= sunHistoryTotalPages.value) {
+    sunHistoryOffset.value = (page - 1) * sunHistoryLimit
+    loadChildData()
+  }
+}
+function goAppleHistoryPage(page: number) {
+  if (page >= 1 && page <= appleHistoryTotalPages.value) {
+    appleHistoryOffset.value = (page - 1) * appleHistoryLimit
+    loadChildData()
   }
 }
 
@@ -243,7 +309,7 @@ function addItem() {
         <section class="panel">
           <div class="card-title">
             <h2>阳光值增减记录</h2>
-            <span class="tag">共 {{ childSunlightHistory.length }} 条</span>
+            <span class="tag">共 {{ sunHistoryTotal }} 条</span>
           </div>
           <div v-if="childSunlightHistory.length" class="list">
             <div
@@ -263,6 +329,12 @@ function addItem() {
             </div>
           </div>
           <p v-else class="muted" style="text-align:center;padding:20px">暂无增减记录</p>
+          <!-- Pagination -->
+          <div v-if="sunHistoryTotalPages > 1" class="pagination">
+            <button class="btn ghost" :disabled="sunHistoryPage <= 1" @click="goSunHistoryPage(sunHistoryPage - 1)">上一页</button>
+            <span class="page-info">第 {{ sunHistoryPage }} / {{ sunHistoryTotalPages }} 页</span>
+            <button class="btn ghost" :disabled="sunHistoryPage >= sunHistoryTotalPages" @click="goSunHistoryPage(sunHistoryPage + 1)">下一页</button>
+          </div>
         </section>
       </template>
 
@@ -409,17 +481,67 @@ function addItem() {
           </div>
         </section>
 
+        <!-- Apple manual adjust -->
+        <section class="panel" style="margin-top:18px">
+          <div class="card-title">
+            <h2>✋ 手动发放 / 扣除苹果</h2>
+            <span class="tag">家长专属</span>
+          </div>
+          <p class="muted" style="margin-bottom:16px;font-size:14px">
+            可以给孩子手动发放苹果作为奖励，也可以扣除苹果作为惩罚。正数为发放，负数为扣除。
+          </p>
+          <div class="award-form">
+            <div class="form-row">
+              <label>快捷操作</label>
+              <div class="quick-grid">
+                <button
+                  v-for="qr in appleQuickReasons"
+                  :key="qr.label"
+                  class="btn ghost quick-btn"
+                  :class="{ 'quick-negative': qr.amount < 0 }"
+                  @click="applyAppleQuickReason(qr)"
+                >
+                  {{ qr.label }} {{ qr.amount > 0 ? '+' : '' }}{{ qr.amount }}
+                </button>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>数量（正数=发放，负数=扣除）</label>
+              <div class="stepper">
+                <button class="step-btn" @click="appleAdjustAmount -= 1">−1</button>
+                <input v-model.number="appleAdjustAmount" type="number" class="input step-input" />
+                <button class="step-btn" @click="appleAdjustAmount += 1">+1</button>
+                <button class="step-btn" @click="appleAdjustAmount = 1">+1</button>
+                <button class="step-btn" @click="appleAdjustAmount = 3">+3</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>原因（可选）</label>
+              <input v-model="appleAdjustReason" class="input" placeholder="例如：帮忙做家务、撒谎" />
+            </div>
+            <div v-if="appleAdjustSuccess" class="success-banner">{{ appleAdjustSuccess }}</div>
+            <button
+              class="btn"
+              style="width:100%;margin-top:12px"
+              :disabled="!appleAdjustAmount || appleAdjustAmount === 0 || appleAdjustLoading"
+              @click="submitAppleAdjust"
+            >
+              {{ appleAdjustLoading ? '处理中...' : (appleAdjustAmount > 0 ? `发放 ${appleAdjustAmount} 个苹果` : `扣除 ${Math.abs(appleAdjustAmount)} 个苹果`) }}
+            </button>
+          </div>
+        </section>
+
         <!-- Apple history -->
         <section class="panel" style="margin-top:18px">
           <div class="card-title">
             <h2>📋 苹果变动记录</h2>
-            <span class="tag">共 {{ childAppleHistory.length }} 条</span>
+            <span class="tag">共 {{ appleHistoryTotal }} 条</span>
           </div>
           <div v-if="childAppleHistory.length" class="list">
             <div v-for="record in childAppleHistory" :key="record.id" class="list-row">
               <div style="min-width:0">
-                <span :style="record.type === 'grow' ? 'color:var(--primary)' : 'color:#c00'">
-                  {{ record.type === 'grow' ? '🍎 种出' : '💰 兑换' }} {{ Math.abs(record.amount) }} 个苹果
+                <span :style="record.type === 'grow' || record.amount > 0 ? 'color:var(--primary)' : 'color:#c00'">
+                  {{ (record.type === 'grow' || record.amount > 0) ? '🍎 +' : '💰 -' }} {{ Math.abs(record.amount) }} 个
                 </span>
                 <span class="muted" style="display:block;font-size:13px">{{ record.reason }}</span>
               </div>
@@ -429,6 +551,12 @@ function addItem() {
             </div>
           </div>
           <p v-else class="muted" style="text-align:center;padding:20px">暂无苹果变动记录</p>
+          <!-- Pagination -->
+          <div v-if="appleHistoryTotalPages > 1" class="pagination">
+            <button class="btn ghost" :disabled="appleHistoryPage <= 1" @click="goAppleHistoryPage(appleHistoryPage - 1)">上一页</button>
+            <span class="page-info">第 {{ appleHistoryPage }} / {{ appleHistoryTotalPages }} 页</span>
+            <button class="btn ghost" :disabled="appleHistoryPage >= appleHistoryTotalPages" @click="goAppleHistoryPage(appleHistoryPage + 1)">下一页</button>
+          </div>
         </section>
       </template>
 
@@ -551,6 +679,22 @@ function addItem() {
   color: #2e7d32;
   font-weight: 800;
   font-size: 15px;
+}
+/* ── Pagination ── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 0 4px;
+  border-top: 1px dashed #e0e0e0;
+  margin-top: 12px;
+}
+.page-info {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--muted);
+  white-space: nowrap;
 }
 .apple-stats {
   display: flex;

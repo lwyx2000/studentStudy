@@ -186,26 +186,33 @@ def submit_checkin(
 
 @router.get('/mine')
 def list_my_checkins(
-    limit: int = 60,
+    limit: int = 50,
+    offset: int = 0,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """孩子查看自己的打卡记录（含审批状态与驳回原因）。"""
+    limit = max(1, min(limit, 200))
     records = (
         db.query(CheckIn)
         .filter(CheckIn.fk_users == current_user.pk_users)
         .order_by(CheckIn.pk_check_ins.desc())
-        .limit(max(1, min(limit, 200)))
+        .offset(offset)
+        .limit(limit)
         .all()
     )
-    return {'checkins': [_checkin_to_dict(r) for r in records]}
+    total = db.query(CheckIn).filter(CheckIn.fk_users == current_user.pk_users).count()
+    return {'checkins': [_checkin_to_dict(r) for r in records], 'total': total, 'offset': offset, 'limit': limit}
 
 
 @router.get('/pending')
 def list_pending_checkins(
+    offset: int = 0,
+    limit: int = 50,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    limit = max(1, min(limit, 200))
     records = (
         db.query(CheckIn)
         .join(User, CheckIn.fk_users == User.pk_users)
@@ -214,13 +221,24 @@ def list_pending_checkins(
             CheckIn.status == 'pending',
         )
         .order_by(CheckIn.created_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
+    )
+    total = (
+        db.query(CheckIn)
+        .join(User, CheckIn.fk_users == User.pk_users)
+        .filter(
+            User.fk_users_parent == current_user.pk_users,
+            CheckIn.status == 'pending',
+        )
+        .count()
     )
     result = []
     for r in records:
         child = db.query(User).filter(User.pk_users == r.fk_users).first()
         result.append(_checkin_to_dict(r, child))
-    return {'pending': result}
+    return {'pending': result, 'total': total, 'offset': offset, 'limit': limit}
 
 
 @router.post('/{checkin_id}/approve')
@@ -322,26 +340,27 @@ def reopen_checkin(
 @router.get('/history')
 def get_checkin_history(
     limit: int = 50,
+    offset: int = 0,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """获取已审批的打卡历史记录"""
-    records = (
+    limit = max(1, min(limit, 200))
+    query = (
         db.query(CheckIn)
         .join(User, CheckIn.fk_users == User.pk_users)
         .filter(
             User.fk_users_parent == current_user.pk_users,
             CheckIn.status != 'pending',
         )
-        .order_by(CheckIn.pk_check_ins.desc())
-        .limit(limit)
-        .all()
     )
+    total = query.count()
+    records = query.order_by(CheckIn.pk_check_ins.desc()).offset(offset).limit(limit).all()
     result = []
     for r in records:
         child = db.query(User).filter(User.pk_users == r.fk_users).first()
         result.append(_checkin_to_dict(r, child))
-    return {'history': result}
+    return {'history': result, 'total': total, 'offset': offset, 'limit': limit}
 
 
 @router.get('/{checkin_id}/details')

@@ -41,18 +41,23 @@ def get_balance(
 @router.get('/history')
 def get_history(
     child_id: int | None = None,
+    offset: int = 0,
+    limit: int = 50,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     target = resolve_target(current_user, child_id, db)
+    limit = max(1, min(limit, 200))
     history = (
         db.query(SunlightHistory)
         .filter(SunlightHistory.fk_users == target.pk_users)
         .order_by(SunlightHistory.created_at.desc())
-        .limit(100)
+        .offset(offset)
+        .limit(limit)
         .all()
     )
-    return {'history': history}
+    total = db.query(SunlightHistory).filter(SunlightHistory.fk_users == target.pk_users).count()
+    return {'history': history, 'total': total, 'offset': offset, 'limit': limit}
 
 
 @router.post('/award')
@@ -200,23 +205,31 @@ SUNLIGHT_PER_APPLE = 100
 @router.get('/apples')
 def get_apples(
     child_id: int | None = None,
+    offset: int = 0,
+    limit: int = 50,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """获取苹果数量和苹果历史"""
     target = resolve_target(current_user, child_id, db)
+    limit = max(1, min(limit, 200))
     apple_history = (
         db.query(AppleHistory)
         .filter(AppleHistory.fk_users == target.pk_users)
         .order_by(AppleHistory.created_at.desc())
-        .limit(100)
+        .offset(offset)
+        .limit(limit)
         .all()
     )
+    total = db.query(AppleHistory).filter(AppleHistory.fk_users == target.pk_users).count()
     return {
         'apples': target.apples,
         'sunlightPoints': target.sunlight_points,
         'sunlightPerApple': SUNLIGHT_PER_APPLE,
         'history': apple_history,
+        'total': total,
+        'offset': offset,
+        'limit': limit,
     }
 
 
@@ -259,7 +272,33 @@ def grow_apple(
     }
 
 
-@router.post('/apples/redeem')
+@router.post('/apples/award')
+def award_apples(
+    amount: int,
+    reason: str = '家长手动调整',
+    child_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """家长给孩子手动调整苹果数量（正数=发放，负数=扣除）"""
+    if current_user.role != 'parent':
+        raise HTTPException(status_code=403, detail='只有家长可以调整苹果')
+    if amount == 0:
+        raise HTTPException(status_code=400, detail='数量不能为 0')
+    target = resolve_target(current_user, child_id, db)
+    new_total = target.apples + amount
+    if new_total < 0:
+        raise HTTPException(status_code=400, detail='苹果数量不足，无法扣除')
+    target.apples = new_total
+    history = AppleHistory(
+        fk_users=target.pk_users,
+        amount=amount,
+        reason=reason,
+        type='earn' if amount > 0 else 'spend',
+    )
+    db.add(history)
+    db.commit()
+    return {'apples': target.apples, 'adjusted': amount}
 def redeem_apple(
     count: int = 1,
     reason: str = '兑换奖励',

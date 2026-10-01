@@ -452,8 +452,8 @@ export const api = {
   points: {
     getBalance: (childId?: string) =>
       request<{ balance: number }>(`/points/balance${childId ? `?child_id=${childId}` : ''}`),
-    getHistory: (childId?: string) =>
-      request<any>(`/points/history${childId ? `?child_id=${childId}` : ''}`),
+    getHistory: (childId?: string, offset = 0, limit = 50) =>
+      request<any>(`/points/history${childId ? `?child_id=${childId}&` : '?'}offset=${offset}&limit=${limit}`),
     award: (amount: number, reason?: string, childId?: string) => {
       const params = new URLSearchParams({ amount: String(amount) })
       if (reason) params.set('reason', reason)
@@ -483,10 +483,12 @@ export const api = {
       request<{ success: boolean }>(`/points/rewards/${id}`, { method: 'DELETE' }),
 
     // ── 苹果相关 API ──
-    getApples: (childId?: string) =>
-      request<{ apples: number; sunlightPoints: number; sunlightPerApple: number; history: any[] }>(`/points/apples${childId ? `?child_id=${childId}` : ''}`),
+    getApples: (childId?: string, offset = 0, limit = 50) =>
+      request<any>(`/points/apples${childId ? `?child_id=${childId}&` : '?'}offset=${offset}&limit=${limit}`),
     growApple: (childId?: string) =>
       request<{ success: boolean; apples: number; sunlightPoints: number }>(`/points/apples/grow${childId ? `?child_id=${childId}` : ''}`, { method: 'POST' }),
+    awardApple: (amount: number, reason: string, childId: string) =>
+      request<{ apples: number; adjusted: number }>(`/points/apples/award?amount=${amount}&reason=${encodeURIComponent(reason)}&child_id=${childId}`, { method: 'POST' }),
     redeemApple: (count: number, reason: string, childId?: string) => {
       const params = new URLSearchParams({ count: String(count), reason })
       if (childId) params.set('child_id', childId)
@@ -529,12 +531,12 @@ export const api = {
       if (data.completedTasks?.length) params.set('completed_tasks', JSON.stringify(data.completedTasks))
       return request<any>(`/checkins/?${params}`, { method: 'POST' })
     },
-    getMine: (limit = 60) =>
-      request<{ checkins: any[] }>(`/checkins/mine?limit=${limit}`),
-    getPending: () =>
-      request<{ pending: any[] }>('/checkins/pending'),
-    getHistory: (limit = 50) =>
-      request<{ history: any[] }>(`/checkins/history?limit=${limit}`),
+    getMine: (limit = 50, offset = 0) =>
+      request<{ checkins: any[]; total: number }>(`/checkins/mine?limit=${limit}&offset=${offset}`),
+    getPending: (offset = 0, limit = 50) =>
+      request<{ pending: any[]; total: number }>(`/checkins/pending?offset=${offset}&limit=${limit}`),
+    getHistory: (limit = 50, offset = 0) =>
+      request<{ history: any[]; total: number }>(`/checkins/history?limit=${limit}&offset=${offset}`),
     approve: (id: number) =>
       request<{ success: boolean; awarded: number }>(`/checkins/${id}/approve`, { method: 'POST' }),
     reject: (id: number, reason?: string) => {

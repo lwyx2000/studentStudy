@@ -107,7 +107,7 @@ export const useUserStore = defineStore('user', () => {
       sunlightPoints.value = balance
     } catch { /* offline */ }
     try {
-      const res = await api.points.getHistory(childId)
+      const res = await api.points.getHistory(childId, 0, 200)
       const raw: any[] = res.history ?? []
       sunlightHistory.value = raw.map(normalizeSunlightRecord)
     } catch { /* offline */ }
@@ -118,9 +118,12 @@ export const useUserStore = defineStore('user', () => {
     } catch { /* offline */ }
     // 加载苹果数据
     try {
-      const res = await api.points.getApples(childId)
+      const res = await api.points.getApples(childId, 0, 200)
       apples.value = res.apples
-      sunlightPoints.value = res.sunlightPoints
+      // 仅在无苹果请求进行中时才覆盖阳光值，防止时序冲突
+      if (!isAppleRequestInFlight()) {
+        sunlightPoints.value = res.sunlightPoints
+      }
       const rawHistory: any[] = res.history ?? []
       appleHistory.value = rawHistory.map((h: any) => ({
         id: String(h.pk_apple_history ?? h.id ?? ''),
@@ -242,6 +245,8 @@ export const useUserStore = defineStore('user', () => {
     if (sunlightPoints.value < SUNLIGHT_PER_APPLE) return false
     growAppleInFlight = true
     // 乐观更新 UI
+    const previousSunlight = sunlightPoints.value
+    const previousApples = apples.value
     sunlightPoints.value -= SUNLIGHT_PER_APPLE
     apples.value += 1
     appleHistory.value.unshift({
@@ -258,13 +263,18 @@ export const useUserStore = defineStore('user', () => {
       if (res?.sunlightPoints !== undefined) sunlightPoints.value = res.sunlightPoints
     }).catch(() => {
       // 失败时回滚
-      sunlightPoints.value += SUNLIGHT_PER_APPLE
-      apples.value -= 1
+      sunlightPoints.value = previousSunlight
+      apples.value = previousApples
       appleHistory.value.shift()
     }).finally(() => {
       growAppleInFlight = false
     })
     return true
+  }
+
+  /** 是否正在处理苹果请求（防止 fetchFromApi 覆盖乐观更新） */
+  function isAppleRequestInFlight(): boolean {
+    return growAppleInFlight || redeemAppleInFlight
   }
 
   /** 孩子端兑换苹果：现在提交申请，等待家长审批后扣苹果 */
@@ -310,6 +320,7 @@ export const useUserStore = defineStore('user', () => {
     pendingSunlight,
     fetchPendingSunlight,
     collectSunlight,
+    isAppleRequestInFlight,
   }
 })
 

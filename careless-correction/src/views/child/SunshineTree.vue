@@ -106,7 +106,8 @@ const collectMessage = ref('')
 function clickTree() {
   if (!userStore.canGrowApple) {
     triggerShake()
-    growMessage.value = `还需要 ${userStore.sunlightPerApple - userStore.sunlightPoints} 阳光才能种出 1 个苹果`
+    const need = Math.max(0, userStore.sunlightPerApple - (userStore.sunlightPoints % userStore.sunlightPerApple))
+    growMessage.value = `还需要 ${need} 阳光才能种出 1 个苹果`
     setTimeout(() => { growMessage.value = '' }, 2500)
     return
   }

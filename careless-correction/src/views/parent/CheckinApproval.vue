@@ -13,6 +13,18 @@ const historyCheckins = ref<any[]>([])
 const loading = ref(false)
 const activeTab = ref<'pending' | 'history'>('pending')
 
+// ── Pagination ──
+const PENDING_PAGE_SIZE = 20
+const HISTORY_PAGE_SIZE = 20
+const pendingOffset = ref(0)
+const pendingTotal = ref(0)
+const pendingPage = computed(() => Math.floor(pendingOffset.value / PENDING_PAGE_SIZE) + 1)
+const pendingTotalPages = computed(() => Math.max(1, Math.ceil(pendingTotal.value / PENDING_PAGE_SIZE)))
+const historyOffset = ref(0)
+const historyTotal = ref(0)
+const historyPage = computed(() => Math.floor(historyOffset.value / HISTORY_PAGE_SIZE) + 1)
+const historyTotalPages = computed(() => Math.max(1, Math.ceil(historyTotal.value / HISTORY_PAGE_SIZE)))
+
 // Expanded detail
 const expandedId = ref<number | null>(null)
 const checkinDetails = ref<any>(null)
@@ -35,16 +47,32 @@ async function loadData() {
 
 async function loadPending() {
   try {
-    const res = await api.checkins.getPending()
+    const res = await api.checkins.getPending(pendingOffset.value, PENDING_PAGE_SIZE)
     pendingCheckins.value = res.pending ?? []
+    pendingTotal.value = res.total ?? 0
   } catch { /* offline */ }
 }
 
 async function loadHistory() {
   try {
-    const res = await api.checkins.getHistory(50)
+    const res = await api.checkins.getHistory(HISTORY_PAGE_SIZE, historyOffset.value)
     historyCheckins.value = res.history ?? []
+    historyTotal.value = res.total ?? 0
   } catch { /* offline */ }
+}
+
+function goPendingPage(p: number) {
+  if (p >= 1 && p <= pendingTotalPages.value) {
+    pendingOffset.value = (p - 1) * PENDING_PAGE_SIZE
+    loadPending()
+  }
+}
+
+function goHistoryPage(p: number) {
+  if (p >= 1 && p <= historyTotalPages.value) {
+    historyOffset.value = (p - 1) * HISTORY_PAGE_SIZE
+    loadHistory()
+  }
 }
 
 async function toggleDetail(ci: any) {
@@ -340,6 +368,12 @@ function formatTime(iso?: string): string {
               </div>
             </div>
           </div>
+          <!-- Pagination for pending -->
+          <div v-if="pendingTotalPages > 1" class="pagination">
+            <button class="btn ghost" :disabled="pendingPage <= 1" @click="goPendingPage(pendingPage - 1)">上一页</button>
+            <span class="page-info">第 {{ pendingPage }} / {{ pendingTotalPages }} 页（共 {{ pendingTotal }} 条）</span>
+            <button class="btn ghost" :disabled="pendingPage >= pendingTotalPages" @click="goPendingPage(pendingPage + 1)">下一页</button>
+          </div>
         </section>
 
         <!-- Empty state -->
@@ -355,7 +389,7 @@ function formatTime(iso?: string): string {
         <section v-if="historyCheckins.length" class="panel">
           <div class="card-title">
             <h2>📜 审批历史</h2>
-            <span class="tag">{{ historyCheckins.length }} 条记录</span>
+            <span class="tag">共 {{ historyTotal }} 条</span>
           </div>
           <div class="list">
             <div
@@ -394,6 +428,12 @@ function formatTime(iso?: string): string {
                 </div>
               </div>
             </div>
+          </div>
+          <!-- Pagination for history -->
+          <div v-if="historyTotalPages > 1" class="pagination">
+            <button class="btn ghost" :disabled="historyPage <= 1" @click="goHistoryPage(historyPage - 1)">上一页</button>
+            <span class="page-info">第 {{ historyPage }} / {{ historyTotalPages }} 页（共 {{ historyTotal }} 条）</span>
+            <button class="btn ghost" :disabled="historyPage >= historyTotalPages" @click="goHistoryPage(historyPage + 1)">下一页</button>
           </div>
         </section>
         <section v-else class="panel empty-state">
@@ -724,5 +764,21 @@ function formatTime(iso?: string): string {
   .stat-row { grid-template-columns: repeat(2, 1fr); }
   .batch-bar { flex-wrap: wrap; }
   .detail-summary { flex-direction: column; align-items: flex-start; }
+}
+/* ── Pagination ── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 0 4px;
+  border-top: 1px dashed #e0e0e0;
+  margin-top: 8px;
+}
+.page-info {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
 }
 </style>
