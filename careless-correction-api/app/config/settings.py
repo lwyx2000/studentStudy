@@ -4,8 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     jwt_secret: str = 'dev-secret-change-in-production'
     jwt_algorithm: str = 'HS256'
-    jwt_expire_minutes: int = 10080  # 7 天（适合本地 Pad 应用）
-    jwt_remember_expire_minutes: int = 43200  # 30 天（记住我选项）
+    jwt_expire_minutes: int = 129600  # 90 天（家庭 Pad 私有应用，物理安全可控，长 token 提升体验）
     upload_dir: str = './uploads'
     llm_endpoint: str = 'https://api.openai.com/v1'
     llm_api_key: str = ''

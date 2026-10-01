@@ -94,6 +94,14 @@ def auto_unlock_badges(target: User, db: Session) -> list[dict]:
             db.add(unlock)
             if badge.reward_points:
                 target.sunlight_points += badge.reward_points
+                # 记录阳光值变动历史（勋章奖励）
+                reward_history = SunlightHistory(
+                    fk_users=target.pk_users,
+                    amount=badge.reward_points,
+                    reason=f'🎖️ 解锁勋章「{badge.name}」奖励',
+                    type='earn',
+                )
+                db.add(reward_history)
             newly_unlocked.append({
                 'pk_badges': badge.pk_badges,
                 'name': badge.name,
@@ -159,7 +167,15 @@ def unlock_badge(
     badge = db.query(Badge).filter(Badge.pk_badges == badge_id).first()
     if badge and badge.reward_points:
         target.sunlight_points += badge.reward_points
-    db.commit()
+        # 记录阳光值变动历史（手动解锁勋章奖励）
+        reward_history = SunlightHistory(
+            fk_users=target.pk_users,
+            amount=badge.reward_points,
+            reason=f'🎖️ 解锁勋章「{badge.name}」奖励',
+            type='earn',
+        )
+        db.add(reward_history)
+        db.commit()
     return {'success': True, 'badge': badge}
 
 
