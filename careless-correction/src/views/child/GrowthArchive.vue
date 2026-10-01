@@ -97,8 +97,9 @@ function switchTab(tab: 'checkins' | 'sunlight' | 'apples') {
   else if (tab === 'apples') loadAppleHistory()
 }
 
-onMounted(() => {
-  loadCheckins()
+onMounted(async () => {
+  await userStore.fetchFromApi()
+  await loadCheckins()
 })
 
 function formatDate(iso: string): string {
