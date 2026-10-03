@@ -786,3 +786,15 @@ export const useParentStore = defineStore('parent', () => {
 
   return { settings, articles, parentTaskTemplates, llmConfig, fetchFromApi, updateSettings, updateLlmConfig, addTaskTemplate, updateTaskTemplate, deleteTaskTemplate, permanentDeleteTaskTemplate, restoreTaskTemplate, allTaskInventory }
 })
+
+// ── 全局共享：待审批打卡数量（导航栏徽章用）──
+// 审批通过/驳回后即时更新，无需等待 30 秒轮询
+import { ref } from 'vue'
+export const pendingCheckinCount = ref(0)
+
+export async function refreshPendingCheckinCount() {
+  try {
+    const res = await api.checkins.getPending(0, 1)
+    pendingCheckinCount.value = res.total ?? (res.pending?.length ?? 0)
+  } catch { /* offline */ }
+}

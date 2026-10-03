@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useUserStore } from '../stores'
+import { useUserStore, pendingCheckinCount, refreshPendingCheckinCount } from '../stores'
 import { api, clearAuthToken, setAuthToken } from '../utils/api'
 import { gradeLabel } from '../utils/constants'
 
@@ -28,7 +28,7 @@ watch(
   () => route.fullPath,
   () => {
     if (isParent.value && !isViewingAsChild.value) {
-      fetchPendingCount()
+      refreshPendingCheckinCount()
       return
     }
     userStore.fetchFromApi()
@@ -72,27 +72,9 @@ async function changePassword() {
   }
 }
 
-// 待审批数量（家长端显示徽章）
-const pendingCheckinCount = ref(0)
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-async function fetchPendingCount() {
-  if (!isParent.value || isViewingAsChild.value) return
-  try {
-    const res = await api.checkins.getPending()
-    pendingCheckinCount.value = (res.pending ?? []).length
-  } catch { /* offline */ }
-}
-
+// onMounted 时初始刷新徽章
 onMounted(() => {
-  if (isParent.value) {
-    fetchPendingCount()
-    pollTimer = setInterval(fetchPendingCount, 30000)
-  }
-})
-
-onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
+  if (isParent.value) refreshPendingCheckinCount()
 })
 
 const childNavItems = [

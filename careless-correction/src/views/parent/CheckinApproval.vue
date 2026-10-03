@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../utils/api'
-import { useBadgeStore, useChildSelectStore } from '../../stores'
+import { pendingCheckinCount, refreshPendingCheckinCount, useBadgeStore, useChildSelectStore } from '../../stores'
 import PointsBreakdown from '../../components/PointsBreakdown.vue'
 
 const childSelectStore = useChildSelectStore()
@@ -101,6 +101,9 @@ async function approveCheckin(id: number) {
     }
     await badgeStore.checkAndUnlock(childSelectStore.selectedChildId ?? undefined)
     await loadHistory()
+    // 更新导航栏徽章
+    pendingCheckinCount.value = Math.max(0, pendingCheckinCount.value - 1)
+    await refreshPendingCheckinCount()
   } catch { /* offline */ }
 }
 
@@ -115,6 +118,9 @@ async function rejectCheckin(id: number) {
       checkinDetails.value = null
     }
     await loadHistory()
+    // 更新导航栏徽章
+    pendingCheckinCount.value = Math.max(0, pendingCheckinCount.value - 1)
+    await refreshPendingCheckinCount()
   } catch { /* offline */ }
 }
 
@@ -124,6 +130,7 @@ async function reopenCheckin(id: number) {
     await loadHistory()
     await loadPending()
     activeTab.value = 'pending'
+    await refreshPendingCheckinCount()
   } catch { /* offline */ }
 }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { api, normalizeTask } from '../../utils/api'
-import { useBadgeStore, useChildSelectStore, useMistakeStore, useParentStore, useTaskStore } from '../../stores'
+import { useBadgeStore, useChildSelectStore, useMistakeStore, useParentStore, useTaskStore, refreshPendingCheckinCount, pendingCheckinCount } from '../../stores'
 import ChildSelector from '../../components/ChildSelector.vue'
 import PointsBreakdown from '../../components/PointsBreakdown.vue'
 
@@ -76,7 +76,6 @@ async function toggleCheckinDetail(ci: any) {
 async function approveCheckin(id: number) {
   try {
     await api.checkins.approve(id)
-    // 更新本地状态：从 pending → approved
     const idx = allCheckins.value.findIndex(c => c.id === id)
     if (idx !== -1) {
       allCheckins.value[idx].status = 'approved'
@@ -87,6 +86,9 @@ async function approveCheckin(id: number) {
       checkinDetails.value = null
     }
     await badgeStore.checkAndUnlock(childSelectStore.selectedChildId ?? undefined)
+    // 更新导航栏徽章
+    pendingCheckinCount.value = Math.max(0, pendingCheckinCount.value - 1)
+    await refreshPendingCheckinCount()
   } catch { /* offline */ }
 }
 
@@ -101,6 +103,9 @@ async function rejectCheckin(id: number) {
       expandedCheckinId.value = null
       checkinDetails.value = null
     }
+    // 更新导航栏徽章
+    pendingCheckinCount.value = Math.max(0, pendingCheckinCount.value - 1)
+    await refreshPendingCheckinCount()
   } catch { /* offline */ }
 }
 

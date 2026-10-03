@@ -162,10 +162,16 @@ def unlock_badge(
     ).first()
     if existing:
         raise HTTPException(status_code=409, detail='已解锁')
+    badge = db.query(Badge).filter(Badge.pk_badges == badge_id).first()
+    if not badge:
+        raise HTTPException(status_code=404, detail='勋章不存在')
+    # 校验解锁条件是否满足（防止孩子端直接调用 API 绕过前端限制）
+    progress = _compute_requirement_progress(badge.requirement_type, badge.requirement_value, target, db)
+    if progress < badge.requirement_value:
+        raise HTTPException(status_code=400, detail=f'未满足解锁条件（当前进度 {progress}/{badge.requirement_value}）')
     unlock = BadgeUnlock(fk_users=target.pk_users, fk_badges=badge_id)
     db.add(unlock)
-    badge = db.query(Badge).filter(Badge.pk_badges == badge_id).first()
-    if badge and badge.reward_points:
+    if badge.reward_points:
         target.sunlight_points += badge.reward_points
         # 记录阳光值变动历史（手动解锁勋章奖励）
         reward_history = SunlightHistory(
@@ -191,3 +197,64 @@ def check_and_unlock(
     target = resolve_target(current_user, child_id, db)
     newly_unlocked = auto_unlock_badges(target, db)
     return {'newly_unlocked': newly_unlocked, 'total_unlocked': len(newly_unlocked)}
+
+
+@router.post('/audit-and-fix-unlocks')
+def audit_and_fix_unlocks(
+    child_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """【家长专用】回滚不该解锁的勋章，并扣除对应阳光。
+    用于修复孩子通过 bug 点击不该解锁的勋章的情况。
+    对每条已有解锁记录重新校验当前条件，不满足的删除 unlock 并扣回 reward 阳光。
+    """
+    if current_user.role != 'parent':
+        raise HTTPException(status_code=403, detail='只有家长可以操作')
+    if not child_id:
+        raise HTTPException(status_code=400, detail='必须指定孩子')
+    child = db.query(User).filter(
+        User.pk_users == child_id,
+        User.fk_users_parent == current_user.pk_users,
+    ).first()
+    if not child:
+        raise HTTPException(status_code=404, detail='孩子账号不存在')
+
+    unlocks = db.query(BadgeUnlock).filter(BadgeUnlock.fk_users == child.pk_users).all()
+    removed = []
+    deducted_sunlight = 0
+
+    for u in unlocks:
+        badge = db.query(Badge).filter(Badge.pk_badges == u.fk_badges).first()
+        if not badge:
+            continue
+        progress = _compute_requirement_progress(badge.requirement_type, badge.requirement_value, child, db)
+        if progress < badge.requirement_value:
+            # 当前条件不满足 → 回滚
+            if badge.reward_points:
+                deducted_sunlight += badge.reward_points
+            db.delete(u)
+            removed.append({'id': badge.pk_badges, 'name': badge.name, 'reward': badge.reward_points})
+
+    if deducted_sunlight > 0:
+        # 扣除多发的阳光（不会低于 0）
+        actual_deduct = min(deducted_sunlight, child.sunlight_points)
+        child.sunlight_points -= actual_deduct
+        history = SunlightHistory(
+            fk_users=child.pk_users,
+            amount=-actual_deduct,
+            reason='🔧 修复：回滚不合条件的勋章，扣回对应的阳光奖励',
+            type='spend',
+        )
+        db.add(history)
+        if actual_deduct < deducted_sunlight:
+            # 阳光不够扣（几乎不可能），用负数记差额不够的部分
+            pass  # 已经扣到 0 为止
+
+    db.commit()
+
+    return {
+        'removed': removed,
+        'removed_count': len(removed),
+        'sunlight_deducted': min(deducted_sunlight, child.sunlight_points + deducted_sunlight) if deducted_sunlight > 0 else 0,
+    }

@@ -54,12 +54,11 @@ onMounted(() => {
           <span class="tag">满足条件自动解锁</span>
         </div>
         <div class="honeycomb">
-          <button
+          <div
             v-for="badge in badgeStore.badges"
             :key="badge.id"
             class="badge-cell"
             :class="{ locked: !badge.unlocked }"
-            @click="badgeStore.unlockBadge(badge.id)"
           >
             <span>{{ badge.icon }}</span>
             <small>{{ badge.name }}</small>
@@ -70,7 +69,7 @@ onMounted(() => {
               </div>
               <small>{{ badge.progress ?? 0 }}/{{ badge.requirementValue }}</small>
             </div>
-          </button>
+          </div>
         </div>
       </div>
     </section>
