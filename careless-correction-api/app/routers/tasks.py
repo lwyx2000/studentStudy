@@ -76,6 +76,7 @@ def _reset_daily_tasks(target_user: User, db: Session):
 @router.get('/today')
 def get_today_tasks(
     child_id: int | None = None,
+    include_completed: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -83,19 +84,24 @@ def get_today_tasks(
     # 自动重置每日任务
     _reset_daily_tasks(target, db)
     today = date.today()
-    tasks = (
-        db.query(Task)
-        .options(selectinload(Task.sub_tasks))
-        .filter(
-            Task.fk_users == target.pk_users,
-            Task.status == 'pending',
-            Task.active == True,
-        )
-        .order_by(Task.type)
-        .all()
+    # 默认只返回待完成任务；include_completed=True 时同时返回当天已完成任务，
+    # 孩子端打卡页用于展示完整清单（未审批前可继续勾选未提交项补交）
+    query = db.query(Task).options(selectinload(Task.sub_tasks)).filter(
+        Task.fk_users == target.pk_users,
+        Task.active == True,
     )
+    if not include_completed:
+        query = query.filter(Task.status == 'pending')
+    tasks = query.order_by(Task.type).all()
     # 主任务按 week_day 过滤（周末任务不在工作日出现等）
     tasks = [t for t in tasks if _matches_week_day(t.week_day, today)]
+    # 已完成任务限定为当天完成（历史完成的任务不属于今天）
+    if include_completed:
+        tasks = [
+            t for t in tasks
+            if t.status == 'pending'
+            or (t.completed_at and t.completed_at.date() == today)
+        ]
     return {'tasks': [TaskOut.model_validate(t) for t in tasks]}
 
 

@@ -335,9 +335,14 @@ export const useTaskStore = defineStore('task', () => {
   const habits = ref<HabitSOP[]>([])
   const weeklyProgress = computed(() => todayTasks.value.filter(task => task.status === 'completed').length)
 
-  async function fetchFromApi(childId?: string) {
+  /**
+   * 拉取今日任务。
+   * includeCompleted=true（孩子打卡页）：同时返回当天已完成任务，保证首次提交后
+   * 清单不会变空，孩子可以在家长审核前继续勾选未提交项再次提交（后端按同日累加）。
+   */
+  async function fetchFromApi(childId?: string, includeCompleted = false) {
     try {
-      const res = await api.tasks.getToday(childId)
+      const res = await api.tasks.getToday(childId, includeCompleted)
       const raw: any[] = res.tasks ?? []
       todayTasks.value = raw.map(normalizeTask)
     } catch { /* offline */ }

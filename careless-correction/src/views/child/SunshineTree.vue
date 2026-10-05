@@ -252,14 +252,11 @@ function createSunDiscSprite() {
   glow.addColorStop(1, 'rgba(255,213,79,0)')
   ctx.fillStyle = glow
   ctx.fillRect(0, 0, size, size)
-  // 圆盘 + 描边
+  // 圆盘（无描边，去掉黑圈）
   ctx.fillStyle = '#ffd54f'
-  ctx.strokeStyle = OUTLINE_CSS
-  ctx.lineWidth = 9
   ctx.beginPath()
   ctx.arc(c, c, 82, 0, Math.PI * 2)
   ctx.fill()
-  ctx.stroke()
   // 高光
   ctx.fillStyle = 'rgba(255,247,189,0.75)'
   ctx.beginPath()

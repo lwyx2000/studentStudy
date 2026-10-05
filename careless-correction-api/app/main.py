@@ -7,7 +7,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
@@ -92,7 +92,19 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
+    expose_headers=['X-Refreshed-Token'],
 )
+
+
+@app.middleware('http')
+async def refresh_token_middleware(request: Request, call_next):
+    """若本请求的鉴权触发了滑动续期，把新 token 放入响应头供前端保存。"""
+    response = await call_next(request)
+    new_token = getattr(request.state, 'refreshed_token', None)
+    if new_token:
+        response.headers['X-Refreshed-Token'] = new_token
+    return response
+
 
 app.mount('/uploads', StaticFiles(directory=settings.upload_dir), name='uploads')
 

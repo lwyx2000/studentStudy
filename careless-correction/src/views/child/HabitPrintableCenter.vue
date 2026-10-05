@@ -412,12 +412,27 @@ function backToDashboard() {
 onMounted(async () => {
   loading.value = true
   await Promise.allSettled([
-    loadChecklistItems(),
+    // includeCompleted：当天已完成任务也返回，保证首次提交打卡后清单不变空，
+    // 家长审核前可继续勾选未提交项再次提交（后端同日累加）
+    taskStore.fetchFromApi(undefined, true).then(loadChecklistItems),
     userStore.fetchFromApi(),
-    loadCheckinStatus(),
+    loadCheckinStatus().then(restoreSubmitStats),
   ])
   loading.value = false
 })
+
+/** 从本地存储恢复当日提交统计（跨页面返回时保持「再提交一次」入口与累计展示） */
+function restoreSubmitStats() {
+  const savedCount = Number(localStorage.getItem(`cc-checklist-count-${activeDate}`) ?? '0')
+  if (Number.isFinite(savedCount) && savedCount > 0) {
+    submitCount.value = savedCount
+    submitted.value = true
+  }
+  const savedCumulative = Number(localStorage.getItem(`cc-checklist-cumulative-${activeDate}`) ?? '0')
+  if (Number.isFinite(savedCumulative) && savedCumulative > 0) {
+    cumulativePoints.value = savedCumulative
+  }
+}
 </script>
 
 <template>

@@ -32,6 +32,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+
+  // 滑动续期：后端在旧 token 快过期时会在响应头返回新 token，自动替换本地存储，
+  // 用户只要还在使用 App 就不需要重新登录。
+  const refreshed = res.headers.get('X-Refreshed-Token')
+  if (refreshed && refreshed !== token) setAuthToken(refreshed)
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     if (res.status === 401) clearAuthToken()
@@ -327,8 +333,14 @@ export const api = {
   },
 
   tasks: {
-    getToday: (childId?: string) =>
-      request<any>(`/tasks/today${childId ? `?child_id=${childId}` : ''}`),
+    getToday: (childId?: string, includeCompleted = false) => {
+      const params = new URLSearchParams()
+      if (childId) params.set('child_id', childId)
+      // 打卡页需要当天已完成任务（其子任务仍可勾选补交，等待家长再次审批）
+      if (includeCompleted) params.set('include_completed', 'true')
+      const qs = params.toString()
+      return request<any>(`/tasks/today${qs ? `?${qs}` : ''}`)
+    },
     getTask: (taskId: string) =>
       request<any>(`/tasks/${taskId}`),
     complete: (taskId: string) =>

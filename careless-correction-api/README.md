@@ -92,4 +92,6 @@ uploads/                       # 上传文件存储
 | PORT | 服务端口 | 3001 |
 | DB_PATH | SQLite 数据库路径 | ./data/app.db |
 | JWT_SECRET | JWT 签名密钥 | dev-secret-change-in-production |
+| JWT_EXPIRE_MINUTES | token 有效期（分钟） | 525600（365 天） |
+| JWT_REFRESH_AFTER_MINUTES | 滑动续期阈值（分钟），使用超过该时长自动换发新 token | 262800（180 天） |
 | UPLOAD_DIR | 上传文件目录 | ./uploads |
