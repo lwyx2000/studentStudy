@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { getMistakeCategoryIcon, getMistakeCategoryLabel } from '../../utils/constants'
 import { useMistakeStore, useUserStore } from '../../stores'
+import { api } from '../../utils/api'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -12,6 +13,8 @@ interface ChecklistRecord {
   date: string
   checkedCount: number
   submitted: boolean
+  status: string
+  totalPoints: number
 }
 
 const records = ref<ChecklistRecord[]>([])
@@ -19,40 +22,31 @@ const loading = ref(true)
 
 const todayStr = new Date().toLocaleDateString('zh-CN')
 
-function loadHistory() {
+async function loadHistory() {
   loading.value = true
-  const list: ChecklistRecord[] = []
-  const prefix = 'cc-checklist-'
-  const submittedPrefix = 'cc-checklist-submitted-'
-
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i)
-    if (!key || !key.startsWith(prefix) || key.startsWith(submittedPrefix)) continue
-
-    const date = key.slice(prefix.length)
-    if (!date) continue
-
-    try {
-      const raw = localStorage.getItem(key)
-      const state: Record<string, boolean> = raw ? JSON.parse(raw) : {}
-      const checkedCount = Object.values(state).filter(Boolean).length
-      const submitted = localStorage.getItem(`${submittedPrefix}${date}`) === 'true'
-
-      // Only show records that have at least one check or are submitted
-      if (checkedCount > 0 || submitted) {
-        list.push({ date, checkedCount, submitted })
+  records.value = []
+  try {
+    // 从服务端读取打卡历史（与成长档案一致，跨设备同步）
+    const res = await api.checkins.getMine(100, 0)
+    const checkins: any[] = res.checkins ?? []
+    records.value = checkins.map((c) => {
+      const date = c.checkDate || c.check_date || ''
+      const status = c.status || 'pending'
+      return {
+        date,
+        checkedCount: c.taskCount || c.task_count || 0,
+        submitted: true,
+        status,
+        totalPoints: c.totalPoints || c.total_points || 0,
       }
-    } catch { /* skip invalid */ }
-  }
-
-  // Sort by date descending (newest first)
-  list.sort((a, b) => {
-    const da = new Date(a.date.replace(/\//g, '-'))
-    const db = new Date(b.date.replace(/\//g, '-'))
-    return db.getTime() - da.getTime()
-  })
-
-  records.value = list
+    }).filter(r => r.date)
+    // 按日期倒序（新的在前）
+    records.value.sort((a, b) => {
+      const da = new Date(a.date.replace(/\//g, '-')).getTime()
+      const db = new Date(b.date.replace(/\//g, '-')).getTime()
+      return db - da
+    })
+  } catch { /* offline */ }
   loading.value = false
 }
 
@@ -69,9 +63,8 @@ function editRecord(date: string) {
 }
 
 function deleteRecord(date: string) {
-  localStorage.removeItem(`cc-checklist-${date}`)
-  localStorage.removeItem(`cc-checklist-submitted-${date}`)
-  loadHistory()
+  // 从最近记录里移除（历史以服务端为准，本地编辑仅影响当日勾选）
+  records.value = records.value.filter(r => r.date !== date)
 }
 
 function formatDate(date: string): string {
@@ -99,6 +92,17 @@ const subjectStats = computed(() => {
 function formatMistakeDate(iso: string): string {
   const d = new Date(iso)
   return `${d.getMonth() + 1}月${d.getDate()}日`
+}
+
+function statusLabel(status: string): string {
+  if (status === 'pending') return '🕐 待审批'
+  if (status === 'approved') return '✅ 已通过'
+  if (status === 'rejected') return '❌ 已驳回'
+  return status
+}
+
+function statusClass(status: string): string {
+  return `status-${status || 'pending'}`
 }
 
 function removeMistake(id: string) {
@@ -162,17 +166,16 @@ onMounted(() => {
               <span class="date-full">{{ record.date }}</span>
             </div>
             <div class="history-stats">
-              <span class="stat-checked">✓ {{ record.checkedCount }} 项</span>
+              <span class="stat-checked">☀️ +{{ record.totalPoints }}</span>
               <span
                 class="stat-status"
-                :class="record.submitted ? 'submitted' : 'pending'"
+                :class="statusClass(record.status)"
               >
-                {{ record.submitted ? '已提交' : '未提交' }}
+                {{ statusLabel(record.status) }}
               </span>
             </div>
             <div class="history-actions">
-              <button class="btn ghost edit-btn" @click="editRecord(record.date)">✏️ 编辑</button>
-              <button class="btn ghost delete-btn" @click="deleteRecord(record.date)">🗑️</button>
+              <button class="btn ghost edit-btn" @click="editRecord(record.date)">✏️</button>
             </div>
           </div>
         </div>
@@ -321,13 +324,17 @@ onMounted(() => {
   padding: 3px 10px;
   border-radius: 999px;
 }
-.stat-status.submitted {
+.stat-status.status-pending {
+  background: #fff3e0;
+  color: #e65100;
+}
+.stat-status.status-approved {
   background: #e8f5e9;
   color: #2e7d32;
 }
-.stat-status.pending {
-  background: #fff3e0;
-  color: #e65100;
+.stat-status.status-rejected {
+  background: #ffebee;
+  color: #c62828;
 }
 .history-actions {
   display: flex;

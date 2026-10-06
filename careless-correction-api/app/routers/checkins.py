@@ -116,6 +116,7 @@ def _checkin_to_dict(r: CheckIn, child: User | None = None) -> dict:
         'status': r.status,
         'createdAt': r.created_at.isoformat() if r.created_at else None,
         'approvedAt': r.approved_at.isoformat() if r.approved_at else None,
+        'completedTasksSnapshot': _load_snapshot(r.completed_tasks_snapshot),
     }
 
 
@@ -139,14 +140,18 @@ def submit_checkin(
 
     snapshot = _sanitize_completed_tasks_snapshot(completed_tasks)
 
-    # 支持同日多次提交：如果当天已有 pending 状态的打卡，累加积分
+    # 支持同日多次提交：如果当天已有未通过审的打卡（pending 或 rejected），累加积分。
+    # 已通过(approved)的记录不允许再累加，避免同一天重复获得阳光。
     existing = db.query(CheckIn).filter(
         CheckIn.fk_users == current_user.pk_users,
         CheckIn.check_date == normalized,
-        CheckIn.status == 'pending',
-    ).first()
+        CheckIn.status.in_(['pending', 'rejected']),
+    ).order_by(CheckIn.pk_check_ins.desc()).first()
     if existing:
-        # 累加到已有的待审批记录
+        # 累加到已有的待审批记录（rejected 记录会重新打开为 pending）
+        if existing.status == 'rejected':
+            existing.status = 'pending'
+            existing.reject_reason = None
         existing.total_points += total_points
         existing.habit_step_count += habit_step_count
         existing.task_count += task_count
@@ -165,6 +170,16 @@ def submit_checkin(
         db.commit()
         db.refresh(existing)
         return {'checkin': existing, 'updated': True}
+
+    # 若同日已有已通过(approved)的打卡，不允许重复提交，避免重复获得阳光
+    already_approved = db.query(CheckIn).filter(
+        CheckIn.fk_users == current_user.pk_users,
+        CheckIn.check_date == normalized,
+        CheckIn.status == 'approved',
+    ).first()
+    if already_approved:
+        raise HTTPException(status_code=400, detail='该日期打卡已审批通过，无需重复提交')
+
     record = CheckIn(
         fk_users=current_user.pk_users,
         check_date=normalized,

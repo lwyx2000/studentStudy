@@ -162,7 +162,7 @@ const checkinStatus = ref<CheckinStatusInfo | null>(null)
 async function loadCheckinStatus() {
   if (!/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(activeDate)) return
   try {
-    const res = await api.checkins.getMine(60)
+    const res = await api.checkins.getMine(100)
     const normalized = activeDate.replace(/\//g, '-')
     const match = (res.checkins ?? []).find((c: any) => {
       const d = String(c.checkDate ?? '').replace(/\//g, '-')
@@ -179,6 +179,16 @@ async function loadCheckinStatus() {
         id: match.id,
         status: match.status,
         rejectReason: match.rejectReason ?? null,
+      }
+      // 历史日期（非今天）编辑时，从服务端恢复该日期的提交状态与已勾选小任务
+      if (!isToday) {
+        // 只要服务端有该日期的打卡记录（无论 pending/rejected/approved），都视为已提交过
+        if (match.status !== 'approved') {
+          submitted.value = true
+        }
+        // 恢复已提交的小任务标题，用于标记「已提交」徽章
+        const snapshot: any[] = match.completedTasksSnapshot ?? []
+        submittedItemIds.value = new Set(snapshot.map((s) => s?.title).filter(Boolean))
       }
     }
   } catch { /* offline */ }
@@ -607,12 +617,37 @@ function restoreSubmitStats() {
 
         <!-- Edit mode notice (for past dates) -->
         <div v-else class="edit-mode-notice">
-          <span>📋 正在回看 {{ activeDate }} 的打卡清单（勾选状态仅保存在本设备，提交记录以家长审批结果为准）</span>
-          <button class="btn ghost" @click="backToDashboard">返回历史</button>
+          <!-- 已通过：只读回看，不可再改/再打 -->
+          <template v-if="checkinStatus?.status === 'approved'">
+            <span class="approve-banner">✅ 该日打卡已审批通过并发放阳光，仅可回看，不能重复打卡</span>
+            <button class="btn ghost" @click="backToDashboard">返回历史</button>
+          </template>
+          <!-- 未通过（待审批/已驳回/无记录）：可继续编辑并打卡 -->
+          <template v-else>
+            <span class="pending-edit-hint">
+              📋 正在编辑 {{ activeDate }} 的打卡
+              <template v-if="checkinStatus?.status === 'pending'"> · 该日已有待审批记录，可继续补充提交</template>
+              <template v-else-if="checkinStatus?.status === 'rejected'"> · 该日曾被驳回，可重新勾选后再次提交</template>
+              <template v-else> · 该日尚未打卡</template>
+            </span>
+            <div v-if="submitMessage" class="submit-message" :class="{ 'submit-error': submitMessage.includes('请先') || submitMessage.includes('已审批') }">
+              {{ submitMessage }}
+            </div>
+            <div class="edit-actions">
+              <button
+                class="btn submit-btn"
+                :disabled="submitting || (checkedTaskItems.length === 0 && checkedHabitSteps.length === 0)"
+                @click="submitChecklist"
+              >
+                {{ submitting ? '⏳ 提交中...' : (checkinStatus?.status === 'rejected' ? `✅ 重新提交打卡（${checkedRequiredItems.length}/${totalCount}${checkedHabitSteps.length ? ` · 🌱 ${checkedHabitSteps.length} 步` : ''}）` : `✅ 提交打卡（必做 ${checkedRequiredItems.length}/${totalCount}${checkedOptionalItems.length ? ` · ⭐ ${checkedOptionalItems.length}` : ''}${checkedHabitSteps.length ? ` · 🌱 ${checkedHabitSteps.length} 步` : ''}）`) }}
+              </button>
+              <button class="btn ghost" @click="backToDashboard">返回历史</button>
+            </div>
+          </template>
         </div>
 
         <div class="print-footer">
-          <p>{{ isToday ? '每天完成后打 ✓，点击提交即可同步打卡记录' : '此页为历史记录回看，勾选不会修改已提交的打卡' }}</p>
+          <p>{{ isToday ? '每天完成后打 ✓，点击提交即可同步打卡记录' : '未通过的打卡可继续编辑并重新提交，累计阳光等待家长审批' }}</p>
         </div>
       </div>
     </template>
@@ -891,6 +926,7 @@ function restoreSubmitStats() {
 .edit-mode-notice {
   margin: 24px 0 8px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
@@ -900,10 +936,42 @@ function restoreSubmitStats() {
   background: #e3f2fd;
   border: 2px solid #64b5f6;
 }
-.edit-mode-notice span {
+.edit-mode-notice .pending-edit-hint {
   font-size: 16px;
   font-weight: 800;
   color: #1565c0;
+  text-align: center;
+}
+.edit-mode-notice .approve-banner {
+  font-size: 16px;
+  font-weight: 800;
+  color: #2e7d32;
+  text-align: center;
+}
+.edit-mode-notice .submit-message {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  font-weight: 700;
+}
+.edit-mode-notice .submit-message.submit-error {
+  background: #ffebee;
+  color: #c62828;
+}
+.edit-mode-notice .edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+}
+.edit-mode-notice .edit-actions .submit-btn {
+  width: 240px;
+  padding: 12px 20px;
+  font-size: 15px;
+  flex: 1;
 }
 .submit-btn {
   width: 100%;
