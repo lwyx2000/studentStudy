@@ -62,11 +62,6 @@ function editRecord(date: string) {
   router.push({ path: '/habit', query: { date } })
 }
 
-function deleteRecord(date: string) {
-  // 从最近记录里移除（历史以服务端为准，本地编辑仅影响当日勾选）
-  records.value = records.value.filter(r => r.date !== date)
-}
-
 function formatDate(date: string): string {
   const isToday = date === todayStr
   const isYesterday = (() => {

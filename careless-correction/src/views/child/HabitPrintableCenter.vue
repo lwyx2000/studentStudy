@@ -275,7 +275,7 @@ async function submitChecklist() {
 
   // 记录本次提交的小任务 ID
   for (const item of checkedTaskItems.value) {
-    submittedItemIds.value.add(item.id)
+    submittedItemIds.value.add(item.title)
   }
 
   // 更新提交统计
@@ -555,7 +555,7 @@ function restoreSubmitStats() {
                         style="background:#fff8d9;color:#8a6d3b;font-weight:800"
                       >⭐ 可选</span>
                       <span
-                        v-if="submittedItemIds.has(item.id)"
+                        v-if="submittedItemIds.has(item.title)"
                         class="ptr-sub-badge"
                         style="background:#e8f5e9;color:#2e7d32;font-weight:800"
                       >已提交</span>
