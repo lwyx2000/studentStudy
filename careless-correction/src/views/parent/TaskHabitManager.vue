@@ -808,7 +808,7 @@ async function downloadPdf() {
                   <span style="font-size:28px;flex-shrink:0">{{ template.icon }}</span>
                   <div style="min-width:0">
                     <strong>{{ template.title }}</strong>
-                    <span class="muted" style="display:block;font-size:13px">{{ template.description || '无描述' }}</span>
+                    <span v-if="template.description" class="muted" style="display:block;font-size:13px">{{ template.description }}</span>
                     <div style="display:flex;gap:6px;margin-top:4px">
                       <span class="mini-tag">{{ categoryOptions.find(c => c.value === template.type)?.label || template.type }}</span>
                       <span class="mini-tag">☀️ +{{ template.rewardPoints }}</span>
@@ -891,7 +891,10 @@ async function downloadPdf() {
                     @keyup.enter="saveEditSubReward(expandedTaskId!, sub.id)"
                   />
                   <button class="btn" style="padding:4px 10px;font-size:12px" @click="saveEditSubReward(expandedTaskId!, sub.id)">保存</button>
-                </div>              </div>            </div>            <button
+                </div>
+              </div>
+            </div>
+            <button
               class="btn ghost"
               style="padding:4px 10px;font-size:12px;color:#8a6d3b"
               :title="sub.isOptional ? '点击改为必做' : '点击改为可选（加分项，不完成不影响审核）'"

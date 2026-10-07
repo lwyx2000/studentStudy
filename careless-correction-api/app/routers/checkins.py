@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import CheckIn, HabitSOP, PendingSunlight, SOPStep, SunlightHistory, Task, User
+from app.models import CheckIn, HabitSOP, PendingSunlight, SOPStep, SubTask, SunlightHistory, Task, User
 from app.routers.badges import auto_unlock_badges
 from app.schemas import TaskOut
 
@@ -100,6 +100,7 @@ def _load_snapshot(snapshot_json: str | None) -> list[dict]:
 
 def _checkin_to_dict(r: CheckIn, child: User | None = None) -> dict:
     child_name = child.name if child else None
+    snapshot = _load_snapshot(r.completed_tasks_snapshot)
     return {
         'id': r.pk_check_ins,
         'childId': r.fk_users,
@@ -107,7 +108,9 @@ def _checkin_to_dict(r: CheckIn, child: User | None = None) -> dict:
         'checkDate': r.check_date,
         'totalPoints': r.total_points,
         'habitStepCount': r.habit_step_count,
-        'taskCount': r.task_count,
+        # 有快照时完成任务数以快照条目数为准，与详情列表保持一致
+        # （旧记录 task_count 存的是主任务数，与小任务明细列表对不上）
+        'taskCount': len(snapshot) if snapshot else r.task_count,
         'requiredPoints': r.required_points,
         'optionalBonus': r.optional_bonus,
         'allDoneBonus': r.all_done_bonus,
@@ -116,7 +119,7 @@ def _checkin_to_dict(r: CheckIn, child: User | None = None) -> dict:
         'status': r.status,
         'createdAt': r.created_at.isoformat() if r.created_at else None,
         'approvedAt': r.approved_at.isoformat() if r.approved_at else None,
-        'completedTasksSnapshot': _load_snapshot(r.completed_tasks_snapshot),
+        'completedTasksSnapshot': snapshot,
     }
 
 
@@ -137,6 +140,36 @@ def submit_checkin(
     normalized = _normalize_check_date(check_date)
     if not normalized:
         raise HTTPException(status_code=400, detail='打卡日期格式无效')
+
+    # 服务端兜底校验：积分不可为负，总分不得超过该孩子当日理论可得上限
+    # （前端计算正确时永远不会触发，仅防御改包/伪造请求刷阳光）
+    total_points = max(0, total_points)
+    task_sum = sum(
+        t.reward_points for t in
+        db.query(Task).filter(Task.fk_users == current_user.pk_users, Task.active == True).all()
+    )
+    # 子任务可单独设分值（可能高于主任务默认分），上限需加上全部子任务的分值总和
+    subtask_sum = sum(
+        (s.reward_points or 0) for s in
+        db.query(SubTask)
+        .join(Task, SubTask.fk_tasks == Task.pk_tasks)
+        .filter(Task.fk_users == current_user.pk_users, Task.active == True).all()
+    )
+    # 习惯计分与前端口径一致：每勾选一步 = 该习惯完整分值（分值 × 步骤数）
+    habit_sum = sum(
+        (h.reward_points or 0) * len(h.steps)
+        for h in db.query(HabitSOP).options(selectinload(HabitSOP.steps))
+              .filter(HabitSOP.fk_users == current_user.pk_users, HabitSOP.active == True).all()
+    )
+    # +10 全完成奖励；可选⭐每项 +2，缓冲按 100 分覆盖极端配置
+    max_possible = max(task_sum, subtask_sum) + habit_sum + 110
+    if total_points > max_possible:
+        total_points = max_possible
+    # 分项同理夹取，保证明细之和不超过总分（审批弹层展示用）
+    required_points = max(0, min(required_points, total_points))
+    habit_points = max(0, min(habit_points, total_points))
+    optional_bonus = max(0, min(optional_bonus, 100))
+    all_done_bonus = max(0, min(all_done_bonus, 10))
 
     snapshot = _sanitize_completed_tasks_snapshot(completed_tasks)
 
@@ -467,7 +500,9 @@ def get_checkin_details(
             'checkDate': record.check_date,
             'totalPoints': record.total_points,
             'habitStepCount': record.habit_step_count,
-            'taskCount': record.task_count,
+            # 完成任务数与下方 completedTasks 列表条数保持一致：
+            # 有快照时取快照条目数（旧记录 task_count 为主任务数，与列表对不上）
+            'taskCount': len(completed_tasks) if snapshot_tasks else record.task_count,
             'requiredPoints': record.required_points,
             'optionalBonus': record.optional_bonus,
             'allDoneBonus': record.all_done_bonus,

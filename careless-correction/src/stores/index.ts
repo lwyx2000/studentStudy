@@ -177,7 +177,14 @@ export const useUserStore = defineStore('user', () => {
 
   function setProfile(p: Partial<UserProfile>) {
     Object.assign(profile.value, p)
-    api.auth.updateProfile(p).catch(() => {})
+    // 只回写后端支持的字段；id/role 等本地字段不触发无意义 PUT
+    const syncable: Partial<UserProfile> = {}
+    if (p.name !== undefined) syncable.name = p.name
+    if (p.grade !== undefined) syncable.grade = p.grade
+    if (p.avatarUrl !== undefined) syncable.avatarUrl = p.avatarUrl
+    if (Object.keys(syncable).length > 0) {
+      api.auth.updateProfile(syncable).catch(() => {})
+    }
   }
 
   function setAssessment(a: ExecutiveFunctionAssessment) {
@@ -191,26 +198,39 @@ export const useUserStore = defineStore('user', () => {
     isOnboarded.value = true
   }
 
-  function redeemItem(itemId: string) {
+  function redeemItem(itemId: string, childId?: string | null) {
     const item = rewardItems.value.find(i => i.id === itemId)
     if (!item || !item.active) return false
     if (sunlightPoints.value < item.cost) return false
+    // 乐观更新，接口失败时回滚（与 growApple 一致，避免假成功扣分）
+    const previousSunlight = sunlightPoints.value
     sunlightPoints.value -= item.cost
-    sunlightHistory.value.unshift({
+    const historyEntry = {
       id: `sl-${Date.now()}`,
       amount: -item.cost,
       reason: `兑换：${item.name}`,
-      type: 'spend',
+      type: 'spend' as const,
       timestamp: new Date().toISOString(),
+    }
+    sunlightHistory.value.unshift(historyEntry)
+    // 内置兜底物品（ri-xxx）后端不存在，只做本地兑换
+    if (!/^\d+$/.test(itemId)) return true
+    api.points.redeem(itemId, childId).then((res: any) => {
+      // 后端返回真实余额时以其为准（家长替孩子兑换场景）
+      if (res?.balance !== undefined) sunlightPoints.value = res.balance
+    }).catch(() => {
+      sunlightPoints.value = previousSunlight
+      const idx = sunlightHistory.value.findIndex(h => h.id === historyEntry.id)
+      if (idx !== -1) sunlightHistory.value.splice(idx, 1)
     })
-    api.points.redeem(itemId).catch(() => {})
     return true
   }
 
-  function addRewardItem(item: Omit<RewardItem, 'id'>) {
+  function addRewardItem(item: Omit<RewardItem, 'id'>, childId?: string | null) {
     const next: RewardItem = { ...item, id: `ri-${Date.now()}` }
     rewardItems.value.push(next)
-    api.points.createReward(item).then((res: any) => {
+    // 挂到目标孩子名下（家长替孩子添加时），否则孩子端查不到
+    api.points.createReward(item, childId).then((res: any) => {
       if (res?.reward) {
         next.id = String(res.reward.pk_reward_items ?? next.id)
       }

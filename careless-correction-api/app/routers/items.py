@@ -44,6 +44,19 @@ def resolve_target(current_user: User, child_id: int | None, db: Session) -> Use
     return child
 
 
+def _check_owner_or_parent(record, current_user: User, db: Session) -> None:
+    """记录归属者本人或其家长可删除（家长管理页删孩子记录时 current_user 是家长）"""
+    if record.fk_users == current_user.pk_users:
+        return
+    owner = db.query(User).filter(
+        User.pk_users == record.fk_users,
+        User.fk_users_parent == current_user.pk_users,
+        User.role == 'child',
+    ).first()
+    if not owner:
+        raise HTTPException(status_code=403, detail='无权操作')
+
+
 @router.get('/loss')
 def get_loss_list(
     child_id: int | None = None,
@@ -160,9 +173,7 @@ def delete_loss_record(
     record = db.query(ItemLossRecord).filter(ItemLossRecord.pk_item_loss_records == record_id).first()
     if not record:
         raise HTTPException(status_code=404, detail='记录不存在')
-    target = resolve_target(current_user, None, db)
-    if record.fk_users != target.pk_users:
-        raise HTTPException(status_code=403, detail='无权操作')
+    _check_owner_or_parent(record, current_user, db)
     db.delete(record)
     db.commit()
     return {'success': True}
@@ -193,9 +204,7 @@ def delete_storage_record(
     record = db.query(ItemStorageRecord).filter(ItemStorageRecord.pk_item_storage_records == record_id).first()
     if not record:
         raise HTTPException(status_code=404, detail='记录不存在')
-    target = resolve_target(current_user, None, db)
-    if record.fk_users != target.pk_users:
-        raise HTTPException(status_code=403, detail='无权操作')
+    _check_owner_or_parent(record, current_user, db)
     db.delete(record)
     db.commit()
     return {'success': True}

@@ -29,10 +29,15 @@ async def upload_image(
     image: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
+    import re
     from pathlib import Path
-    upload_dir = Path('./uploads')
+    from app.config import Settings
+
+    upload_dir = Path(Settings().upload_dir)
     upload_dir.mkdir(exist_ok=True)
-    file_path = upload_dir / f'mistake_{datetime.now().timestamp()}_{image.filename}'
+    # 消毒客户端文件名：只保留安全字符，防路径穿越（../）与奇异字符
+    safe_name = re.sub(r'[^\w.\-]', '_', Path(image.filename or 'img.jpg').name)[:80]
+    file_path = upload_dir / f'mistake_{datetime.now().timestamp():.0f}_{safe_name}'
     content = await image.read()
     file_path.write_bytes(content)
     return {'imageUrl': f'/uploads/{file_path.name}'}

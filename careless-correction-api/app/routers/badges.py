@@ -181,7 +181,9 @@ def unlock_badge(
             type='earn',
         )
         db.add(reward_history)
-        db.commit()
+    # commit 必须在 if 块外：无奖励阳光的勋章也要把解锁记录落库，
+    # 否则事务回滚后下次还能重复解锁
+    db.commit()
     return {'success': True, 'badge': badge}
 
 

@@ -160,7 +160,7 @@ function statusLabel(s: string) {
             <div style="flex:1;min-width:0">
               <strong>📅 {{ c.check_date || c.checkDate }}</strong>
               <span class="muted" style="display:block;font-size:13px">
-                ☀️ +{{ c.total_points || c.totalPoints }} 阳光 · {{ c.task_count || c.taskCount || 0 }} 任务
+                ☀️ +{{ c.total_points || c.totalPoints }} 阳光 · {{ c.task_count || c.taskCount || 0 }} 小任务
               </span>
             </div>
             <span class="tag" :class="{'status-pending': (c.status || 'pending') === 'pending', 'status-approved': (c.status || 'pending') === 'approved', 'status-rejected': c.status === 'rejected'}">

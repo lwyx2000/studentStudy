@@ -82,6 +82,7 @@ async function switchToChild(child: ChildProfile) {
     const res = await api.children.switchToken(child.id)
     setAuthToken(res.token)
     const childProfile = normalizeUser(res.user)
+    // 仅本地赋值：setProfile 已不再对纯角色切换触发 PUT，避免用孩子 token 改写资料
     userStore.setProfile(childProfile)
 
     // 重新加载孩子数据

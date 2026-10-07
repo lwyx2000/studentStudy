@@ -40,7 +40,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    if (res.status === 401) clearAuthToken()
+    if (res.status === 401) {
+      clearAuthToken()
+      // token 失效（过期/服务端重启导致验签失败）时不能停在空数据页面，
+      // 自动回登录页；登录/注册接口自身的 401（密码错误）不跳
+      if (!window.location.pathname.startsWith('/login') && !path.startsWith('/auth/login') && !path.startsWith('/auth/register')) {
+        window.location.href = '/login'
+      }
+    }
     throw new Error(body.detail || body.error || `API Error: ${res.status}`)
   }
   return res.json()
@@ -472,14 +479,15 @@ export const api = {
       if (childId) params.set('child_id', childId)
       return request<{ balance: number; awarded: number }>(`/points/award?${params}`, { method: 'POST' })
     },
-    redeem: (rewardItemId: string) =>
-      request<{ success: boolean; pointsSpent: number; itemName: string }>(`/points/redeem?reward_item_id=${rewardItemId}`, { method: 'POST' }),
+    redeem: (rewardItemId: string, childId?: string | null) =>
+      request<{ success: boolean; pointsSpent: number; itemName: string; balance: number }>(`/points/redeem?reward_item_id=${rewardItemId}${childId ? `&child_id=${childId}` : ''}`, { method: 'POST' }),
     getRewards: (childId?: string) =>
       request<any>(`/points/rewards${childId ? `?child_id=${childId}` : ''}`),
-    createReward: (data: { name: string; description?: string; cost: number; icon?: string }) => {
+    createReward: (data: { name: string; description?: string; cost: number; icon?: string }, childId?: string | null) => {
       const params = new URLSearchParams({ name: data.name, cost: String(data.cost) })
       if (data.description) params.set('description', data.description)
       if (data.icon) params.set('icon', data.icon)
+      if (childId) params.set('child_id', childId)
       return request<any>(`/points/rewards?${params}`, { method: 'POST' })
     },
     updateReward: (id: string, data: { name?: string; description?: string; cost?: number; icon?: string; active?: boolean }) => {

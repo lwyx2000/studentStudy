@@ -148,6 +148,10 @@ const submittedKey = `cc-checklist-submitted-${lsDateKey}`
 const submitted = ref<boolean>(localStorage.getItem(submittedKey) === 'true')
 const submitting = ref(false)
 const submitMessage = ref('')
+// 本次进入页面后是否已成功提交：成功后按钮置灰，重新进入页面才能再次打卡
+const justSubmitted = ref(false)
+// 记录本次成功提交是否为「驳回后的重新打卡」，用于按钮与文案区分
+const lastSubmitWasResubmit = ref(false)
 // 追踪已提交的小任务 ID（多次提交场景）
 const submittedItemIds = ref<Set<string>>(new Set())
 const submitCount = ref(0)
@@ -249,7 +253,7 @@ const allRequiredDone = computed(() =>
 )
 
 async function submitChecklist() {
-  if (submitting.value) return
+  if (submitting.value || justSubmitted.value) return
   // 至少勾选一项（必做或可选均可）才能提交
   if (checkedTaskItems.value.length === 0 && checkedHabitSteps.value.length === 0) {
     submitMessage.value = '请先勾选至少一项任务或习惯步骤再提交'
@@ -259,15 +263,14 @@ async function submitChecklist() {
   submitMessage.value = ''
 
   let totalPoints = 0
-  const completedTaskTitles: string[] = []
 
-  // 标记主任务完成（同步到后端）并统计完成任务数，分数改由子任务独立计分
+  // 标记主任务完成（同步到后端）；完成任务数改按小任务明细数统计，
+  // 与家长端详情的「已完成的任务」列表（快照）保持一致
   const completedParentTasks = new Set<string>()
   for (const item of checkedTaskItems.value) {
     if (completedParentTasks.has(item.parentTaskId)) continue
     completedParentTasks.add(item.parentTaskId)
     taskStore.completeTask(item.parentTaskId)
-    completedTaskTitles.push(item.parentTaskTitle)
   }
 
   // 每个必做小任务按各自分值独立计分
@@ -288,48 +291,66 @@ async function submitChecklist() {
   const done = taskStore.todayTasks.filter(t => t.status === 'completed').length
   growthStore.recordDataPoint({ taskCompletionRate: done / Math.max(taskStore.todayTasks.length, 1) })
 
-  // 记录本次提交的小任务 ID
+  // 记录本次提交的小任务 ID（先记录，提交失败也不影响本地展示）
   for (const item of checkedTaskItems.value) {
     submittedItemIds.value.add(item.title)
   }
 
-  // 更新提交统计
-  submitCount.value += 1
-  submitted.value = true
-  submitting.value = false
-  localStorage.setItem(submittedKey, 'true')
-  localStorage.setItem(`cc-checklist-count-${lsDateKey}`, String(submitCount.value))
-
   // Submit check-in to backend for parent approval
   if (totalPoints > 0) {
-    api.checkins.submit({
-      checkDate: activeDate,
-      totalPoints,
-      habitStepCount: checkedHabitSteps.value.length,
-      taskCount: completedTaskTitles.length,
-      requiredPoints: checkedRequiredPoints.value,
-      optionalBonus: optionalBonusPoints.value,
-      allDoneBonus: allRequiredDone.value ? ALL_DONE_BONUS_POINTS : 0,
-      habitPoints: habitPoints.value,
-      completedTasks: checkedTaskItems.value.map(item => ({
-        title: item.title,
-        icon: item.icon,
-        points: itemPoints(item),
-      })),
-    }).then(() => {
+    const wasRejected = checkinStatus.value?.status === 'rejected'
+    try {
+      await api.checkins.submit({
+        checkDate: activeDate,
+        totalPoints,
+        habitStepCount: checkedHabitSteps.value.length,
+        // 完成任务数 = 本次勾选的小任务条目数，与 completedTasks 快照长度一致，
+        // 避免家长端详情「完成任务」数字与下方列表条数对不上
+        taskCount: checkedTaskItems.value.length,
+        requiredPoints: checkedRequiredPoints.value,
+        optionalBonus: optionalBonusPoints.value,
+        allDoneBonus: allRequiredDone.value ? ALL_DONE_BONUS_POINTS : 0,
+        habitPoints: habitPoints.value,
+        completedTasks: checkedTaskItems.value.map(item => ({
+          title: item.title,
+          icon: item.icon,
+          points: itemPoints(item),
+        })),
+      })
+      // ★ 提交成功后再更新本地持久化状态，避免 API 失败时状态不一致
+      submitCount.value += 1
+      submitted.value = true
+      localStorage.setItem(submittedKey, 'true')
+      localStorage.setItem(`cc-checklist-count-${lsDateKey}`, String(submitCount.value))
+      submitting.value = false
+
       const extras: string[] = []
       if (allRequiredDone.value) extras.push(`全部完成奖励 +${ALL_DONE_BONUS_POINTS}`)
       if (optionalBonusPoints.value > 0) extras.push(`可选 ⭐ 加分 +${optionalBonusPoints.value}`)
       if (habitPoints.value > 0) extras.push(`习惯打卡 +${habitPoints.value}`)
       const extraText = extras.length ? `（含 ${extras.join(' · ')}）` : ''
-      submitMessage.value = `第 ${submitCount.value} 次打卡已提交，+${totalPoints} 阳光值 ${extraText}等待家长审批 🕐`
-    }).catch(() => {
-      submitMessage.value = `打卡已记录！等待家长审批后获得 +${totalPoints} 阳光值 🕐`
-    })
+      lastSubmitWasResubmit.value = wasRejected
+      // 后端覆盖式提交，不展示「第N次」，避免家长困惑
+      submitMessage.value = wasRejected
+        ? `✅ 重新打卡提交成功！+${totalPoints} 阳光值 ${extraText}等待家长审批 🕐`
+        : `✅ 打卡已提交，+${totalPoints} 阳光值 ${extraText}等待家长审批 🕐`
+      // 历史日期：提交成功后按钮置灰（覆盖式提交，需重新进入页面才能再次编辑提交）
+      // 今天日期：不设 justSubmitted，孩子可继续补充勾选再提交（仍覆盖）
+      if (!isToday) {
+        justSubmitted.value = true
+      }
+      // 本地同步审批状态为待审批，驳回横幅切换为待审批提示
+      if (checkinStatus.value && checkinStatus.value.status === 'rejected') {
+        checkinStatus.value = { ...checkinStatus.value, status: 'pending', rejectReason: null }
+      }
+    } catch {
+      submitting.value = false
+      submitMessage.value = `打卡提交异常，请稍后重试（本次 +${totalPoints} 阳光值）`
+    }
   } else {
+    submitting.value = false
     submitMessage.value = '继续保持！'
   }
-}
 
 // ── 习惯计分：勾选完成的习惯步骤按各习惯分值计分 ──
 interface HabitChecklistItem {
@@ -612,10 +633,10 @@ function restoreSubmitStats() {
           </div>
           <button
             class="btn submit-btn"
-            :disabled="submitting || (checkedTaskItems.length === 0 && checkedHabitSteps.length === 0)"
+            :disabled="submitting || justSubmitted || (checkedTaskItems.length === 0 && checkedHabitSteps.length === 0)"
             @click="submitChecklist"
           >
-            {{ submitting ? '⏳ 提交中...' : (submitCount > 0 ? `✅ 再提交（+${currentSubmissionPoints} 阳光）` : `✅ 提交打卡（+${currentSubmissionPoints} 阳光，必做 ${checkedRequiredItems.length}/${totalCount}${checkedOptionalItems.length ? ` · ⭐ ${checkedOptionalItems.length}` : ''}${checkedHabitSteps.length ? ` · 🌱 ${checkedHabitSteps.length} 步` : ''}）`) }}
+            {{ submitting ? '⏳ 提交中...' : (justSubmitted ? '✅ 已提交成功，重新进入页面可再次打卡' : (submitCount > 0 ? `✅ 再提交（+${currentSubmissionPoints} 阳光）` : `✅ 提交打卡（+${currentSubmissionPoints} 阳光，必做 ${checkedRequiredItems.length}/${totalCount}${checkedOptionalItems.length ? ` · ⭐ ${checkedOptionalItems.length}` : ''}${checkedHabitSteps.length ? ` · 🌱 ${checkedHabitSteps.length} 步` : ''}）`)) }}
           </button>
           <button
             v-if="submitted"
@@ -645,10 +666,10 @@ function restoreSubmitStats() {
             <div class="edit-actions">
               <button
                 class="btn submit-btn"
-                :disabled="submitting || (checkedTaskItems.length === 0 && checkedHabitSteps.length === 0)"
+                :disabled="submitting || justSubmitted || (checkedTaskItems.length === 0 && checkedHabitSteps.length === 0)"
                 @click="submitChecklist"
               >
-                {{ submitting ? '⏳ 提交中...' : (checkinStatus?.status === 'rejected' ? `✅ 重新提交（+${currentSubmissionPoints} 阳光）` : `✅ 提交打卡（+${currentSubmissionPoints} 阳光）`) }}
+                {{ submitting ? '⏳ 提交中...' : (justSubmitted ? `✅ ${lastSubmitWasResubmit ? '重新打卡' : '打卡'}已提交成功，重新进入页面可再次打卡` : (checkinStatus?.status === 'rejected' ? `✅ 重新提交（+${currentSubmissionPoints} 阳光）` : `✅ 提交打卡（+${currentSubmissionPoints} 阳光）`)) }}
               </button>
               <button class="btn ghost" @click="backToDashboard">返回历史</button>
             </div>

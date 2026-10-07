@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { loadSlim } from '@tsparticles/slim'
 import type { Engine, ISourceOptions } from '@tsparticles/engine'
 import { useBadgeStore, useChildSelectStore, useParentStore, useUserStore } from '../stores'
 import { api, normalizeUser, setAuthToken } from '../utils/api'
+import { clearCredentials, loadCredentials, saveCredentials } from '../utils/credentials'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -15,6 +16,18 @@ const password = ref('')
 const confirmPassword = ref('')
 const error = ref('')
 const loading = ref(false)
+// 保存账号密码（加密存前端，5 天过期）
+const savePwd = ref(false)
+
+// 进入登录页时回填未过期的已存凭据；已过期的由 loadCredentials 内部自动删除
+onMounted(() => {
+  const cred = loadCredentials()
+  if (cred) {
+    name.value = cred.username
+    password.value = cred.password
+    savePwd.value = true
+  }
+})
 
 async function submit() {
   error.value = ''
@@ -36,13 +49,20 @@ async function submit() {
     userStore.setProfile(normalizeUser(res.user))
     userStore.completeOnboarding()
 
+    // 勾选了「保存账号密码」则加密存下（重新记录 5 天有效期）；取消勾选则清除
+    if (mode.value === 'login') {
+      if (savePwd.value) saveCredentials(name.value.trim(), password.value)
+      else clearCredentials()
+    }
+
     await Promise.allSettled([
       userStore.fetchFromApi(),
       useParentStore().fetchFromApi(),
       useBadgeStore().fetchFromApi(),
       useChildSelectStore().loadChildren(),
     ])
-    router.replace('/parent')
+    // 按角色分流：孩子直接进自己的仪表盘，避免多一次重定向
+    router.replace(userStore.profile.role === 'parent' ? '/parent' : '/dashboard')
   } catch (e: any) {
     error.value = e.message || '操作失败，请重试'
   } finally {
@@ -159,6 +179,11 @@ const particlesOptions: ISourceOptions = {
                 <span class="icon">🔒</span>
                 <input v-model="confirmPassword" class="inp" type="password" placeholder="再次输入密码" @keyup.enter="submit" />
               </div>
+            </label>
+
+            <label v-if="mode === 'login'" class="save-pwd-row">
+              <input v-model="savePwd" type="checkbox" />
+              <span>💾 保存账号密码（5 天内自动填写，过期后自动清除）</span>
             </label>
 
             <Transition name="err">
@@ -382,6 +407,24 @@ const particlesOptions: ISourceOptions = {
 .inp:focus {
   border-color: #4caf50;
   box-shadow: 0 0 0 5px rgba(76,175,80,0.18);
+}
+
+/* ── 保存账号密码 ── */
+.save-pwd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+  user-select: none;
+}
+.save-pwd-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: #4caf50;
+  cursor: pointer;
 }
 
 /* ── 错误 ── */

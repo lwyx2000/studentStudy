@@ -239,9 +239,10 @@ const newItemIcon = ref('🎁')
 const showAddForm = ref(false)
 
 function handleRedeem(itemId: string) {
-  const ok = userStore.redeemItem(itemId)
+  // 家长替选中的孩子兑换：扣孩子的阳光值，物品也挂在孩子名下
+  const ok = userStore.redeemItem(itemId, childSelectStore.selectedChildId)
   if (!ok) alert('阳光值不足，无法兑换此物品')
-  else loadChildData()
+  else { setTimeout(loadChildData, 600) }
 }
 
 function addItem() {
@@ -252,7 +253,7 @@ function addItem() {
     cost: newItemCost.value,
     icon: newItemIcon.value,
     active: true,
-  })
+  }, childSelectStore.selectedChildId)
   newItemName.value = ''
   newItemDesc.value = ''
   newItemCost.value = 30

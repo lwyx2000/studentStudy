@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore, pendingCheckinCount, refreshPendingCheckinCount } from '../stores'
 import { api, clearAuthToken, setAuthToken } from '../utils/api'
@@ -20,6 +20,24 @@ const sidebarCollapsed = ref(localStorage.getItem('cc-sidebar-collapsed') === 't
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
   localStorage.setItem('cc-sidebar-collapsed', String(sidebarCollapsed.value))
+}
+
+// ── 移动端横向菜单：滚动提示（两侧渐隐 + 箭头按钮，告知后面还有菜单）──
+const navRef = ref<HTMLElement | null>(null)
+const navMoreRight = ref(false) // 右侧还有未露出的菜单
+const navMoreLeft = ref(false)  // 已向右滚动，可滚回
+
+function updateNavHint() {
+  const el = navRef.value
+  if (!el) return
+  navMoreLeft.value = el.scrollLeft > 4
+  navMoreRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 4
+}
+
+function scrollNav(dir: 1 | -1) {
+  const el = navRef.value
+  if (!el) return
+  el.scrollBy({ left: dir * Math.max(160, el.clientWidth * 0.8), behavior: 'smooth' })
 }
 
 // 页面切换时刷新阳光/苹果余额：顶部 pill 与各页面共享同一 store，刷新一次即全局生效
@@ -75,6 +93,12 @@ async function changePassword() {
 // onMounted 时初始刷新徽章
 onMounted(() => {
   if (isParent.value) refreshPendingCheckinCount()
+  updateNavHint()
+  window.addEventListener('resize', updateNavHint)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateNavHint)
 })
 
 const childNavItems = [
@@ -100,6 +124,11 @@ const parentNavItems = [
   { name: 'LlmConfig', path: '/parent/llm', icon: '🤖', label: '模型配置' },
 ]
 const navItems = computed(() => (isParent.value ? parentNavItems : childNavItems))
+
+// 菜单项/收缩状态变化后重新测量是否溢出（家长/孩子切换、待审批徒章变化都会影响宽度）
+watch([navItems, sidebarCollapsed, pendingCheckinCount], () => {
+  nextTick(updateNavHint)
+})
 
 async function backToParent() {
   const parentToken = localStorage.getItem('cc-parent-token')
@@ -149,20 +178,27 @@ function logout() {
         <strong>{{ userStore.profile.name || '我的' }}{{ isParent ? ' 的管理台' : ' 的成长树' }}</strong>
         <span>{{ isParent ? '管理孩子的成长旅程' : '今天只聚焦 1 个核心习惯' }}</span>
       </div>
-      <nav class="nav-list" :class="{ 'nav-collapsed': sidebarCollapsed }">
-        <router-link
-          v-for="item in navItems"
-          :key="item.name"
-          :to="item.path"
-          class="nav-item"
-          :class="{ active: route.name === item.name }"
-          :title="sidebarCollapsed ? item.label : ''"
-        >
-          <span class="nav-icon">{{ item.icon }}</span>
-          <span v-if="!sidebarCollapsed" class="nav-label">{{ item.label }}</span>
-          <span v-if="item.name === 'CheckinApproval' && pendingCheckinCount > 0" class="nav-badge">{{ pendingCheckinCount }}</span>
-        </router-link>
-      </nav>
+      <div class="nav-wrap">
+        <nav ref="navRef" class="nav-list" :class="{ 'nav-collapsed': sidebarCollapsed }" @scroll.passive="updateNavHint">
+          <router-link
+            v-for="item in navItems"
+            :key="item.name"
+            :to="item.path"
+            class="nav-item"
+            :class="{ active: route.name === item.name }"
+            :title="sidebarCollapsed ? item.label : ''"
+          >
+            <span class="nav-icon">{{ item.icon }}</span>
+            <span v-if="!sidebarCollapsed" class="nav-label">{{ item.label }}</span>
+            <span v-if="item.name === 'CheckinApproval' && pendingCheckinCount > 0" class="nav-badge">{{ pendingCheckinCount }}</span>
+          </router-link>
+        </nav>
+        <!-- 移动端横向溢出提示：箭头可点，两侧渐变色告知还有菜单 -->
+        <button v-if="navMoreLeft" class="nav-arrow nav-arrow-left" title="查看前面的菜单" @click="scrollNav(-1)">‹</button>
+        <button v-if="navMoreRight" class="nav-arrow nav-arrow-right" title="后面还有菜单，点击向右滑动" @click="scrollNav(1)">›</button>
+        <span v-if="navMoreRight" class="nav-fade nav-fade-right"></span>
+        <span v-if="navMoreLeft" class="nav-fade nav-fade-left"></span>
+      </div>
     </aside>
 
     <main class="content">
@@ -227,8 +263,11 @@ function logout() {
 .tree-card span { color: var(--muted); font-size: 13px; }
 .clickable-card { cursor: pointer; transition: background .12s ease; }
 .clickable-card:hover { background: #f7fcef; }
+.nav-wrap { position: relative; }
 .nav-list { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
 .nav-list.nav-collapsed { margin-top: 18px; gap: 6px; }
+/* 横向溢出提示：桌面竖排菜单不会溢出，默认隐藏 */
+.nav-arrow, .nav-fade { display: none; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 18px; color: var(--muted); text-decoration: none; font-weight: 850; transition: all .15s ease; position: relative; }
 .nav-list.nav-collapsed .nav-item { justify-content: center; padding: 13px 0; }
 .nav-icon { font-size: 20px; flex-shrink: 0; }
@@ -254,7 +293,7 @@ function logout() {
 @keyframes badgePulse {
   50% { box-shadow: 0 0 0 4px rgba(230, 81, 0, .2); }
 }
-.content { padding: 28px; overflow: auto; }
+.content { padding: 28px; padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); overflow: auto; }
 /* 修改密码弹窗 */
 .overlay {
   position: fixed;
@@ -321,5 +360,17 @@ function logout() {
   font-size: 14px;
 }
 
-@media (max-width: 860px) { .shell, .shell.collapsed { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; } .topbar { position: static; align-items: flex-start; gap: 12px; flex-direction: column; padding: 16px; } .sidebar, .sidebar.collapsed { border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 14px; } .tree-card { display: none; } .nav-list, .nav-list.nav-collapsed { margin: 0; flex-direction: row; overflow-x: auto; gap: 8px; } .nav-item { white-space: nowrap; } .nav-list.nav-collapsed .nav-item { padding: 13px 14px; } .content { padding: 18px; } }
+@media (max-width: 860px) { .shell, .shell.collapsed { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; } .topbar { position: static; align-items: flex-start; gap: 12px; flex-direction: column; padding: 16px; padding-top: calc(16px + env(safe-area-inset-top, 0px)); } .sidebar, .sidebar.collapsed { border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 14px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); } .tree-card { display: none; } .nav-wrap { display: flex; align-items: center; } .nav-list, .nav-list.nav-collapsed { margin: 0; flex-direction: row; overflow-x: auto; gap: 8px; -webkit-overflow-scrolling: touch; scrollbar-width: thin; } .nav-item { white-space: nowrap; } .nav-list.nav-collapsed .nav-item { padding: 13px 14px; } .content { padding: 18px; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+  /* 移动端：两侧渐隐 + 可点箭头，提示菜单可横向滑动、后面还有内容 */
+  .nav-arrow { display: grid; place-items: center; position: absolute; top: 50%; transform: translateY(-50%); z-index: 5; width: 34px; height: 34px; border-radius: 999px; border: 1px solid var(--line); background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.16); font-size: 24px; line-height: 1; color: var(--primary); cursor: pointer; padding: 0; }
+  .nav-arrow:active { background: #ecffd9; }
+  .nav-arrow-right { right: 0; animation: navArrowNudge 1.6s ease infinite; }
+  .nav-arrow-left { left: 0; }
+  .nav-fade { display: block; position: absolute; top: 0; bottom: 0; width: 44px; pointer-events: none; }
+  .nav-fade-right { right: 0; background: linear-gradient(90deg, rgba(246,244,233,0), rgba(246,244,233,.95)); }
+  .nav-fade-left { left: 0; background: linear-gradient(270deg, rgba(246,244,233,0), rgba(246,244,233,.95)); }
+}
+@keyframes navArrowNudge {
+  50% { transform: translateY(-50%) translateX(4px); }
+}
 </style>

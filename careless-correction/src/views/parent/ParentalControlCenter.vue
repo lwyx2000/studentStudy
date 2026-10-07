@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, normalizeTask } from '../../utils/api'
 import { useBadgeStore, useChildSelectStore, useMistakeStore, useParentStore, useTaskStore, refreshPendingCheckinCount, pendingCheckinCount } from '../../stores'
 import ChildSelector from '../../components/ChildSelector.vue'
@@ -140,20 +140,70 @@ const displayTasks = computed(() => parentStore.parentTaskTemplates)
 const completedCount = computed(() => displayTasks.value.filter(t => t.status === 'completed').length)
 const progressPercent = computed(() => Math.round((completedCount.value / Math.max(displayTasks.value.length, 1)) * 100))
 
-// ── 打卡趋势图表数据（取近 7 次打卡）──
-const recentCheckins = computed(() => {
+// ── 打卡趋势图表数据 ──
+// 所选孩子已通过的打卡，按时间倒序
+const approvedChildCheckins = computed(() => {
   const childId = childSelectStore.selectedChildId
-  const list = allCheckins.value
+  return allCheckins.value
     .filter(c => c.status === 'approved' && (!childId || String(c.childId) === childId))
     .sort((a, b) => {
       const da = new Date(a.approvedAt || a.createdAt || 0).getTime()
       const db = new Date(b.approvedAt || b.createdAt || 0).getTime()
       return db - da
     })
-  return list.slice(0, 7).reverse()
+})
+// 页内小图：近 7 次
+const recentCheckins = computed(() => approvedChildCheckins.value.slice(0, 7).reverse())
+const maxPoints = computed(() => Math.max(...recentCheckins.value.map(c => c.totalPoints || 0), 1))
+
+// ── 趋势图全屏（手机尝试强制横屏，展示更多天数据）──
+const trendFullscreen = ref(false)
+// 全屏大图：近 30 次
+const trendCheckins = computed(() => approvedChildCheckins.value.slice(0, 30).reverse())
+const trendMaxPoints = computed(() => Math.max(...trendCheckins.value.map(c => c.totalPoints || 0), 1))
+const trendAvgPoints = computed(() => {
+  const list = trendCheckins.value
+  if (!list.length) return 0
+  return Math.round(list.reduce((s, c) => s + (c.totalPoints || 0), 0) / list.length)
 })
 
-const maxPoints = computed(() => Math.max(...recentCheckins.value.map(c => c.totalPoints || 0), 1))
+/** 将 2026/10/7、2026-10-07 等日期缩为 10/7，全屏密集柱状图下更省空间 */
+function shortDate(s: string): string {
+  const parts = String(s || '').replace(/\//g, '-').split('-')
+  if (parts.length === 3) return `${parts[1]}/${parts[2]}`
+  return s
+}
+
+async function openTrendFullscreen() {
+  if (!recentCheckins.value.length) return
+  trendFullscreen.value = true
+  try {
+    // 先进入原生全屏（部分 WebView 不支持，降级为页内全屏遮罩），再尝试锁定横屏
+    if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+      await document.documentElement.requestFullscreen()
+    }
+    // 方向锁定只有全屏下才生效；iOS 等平台不支持，静默降级
+    const orientation = (screen as any).orientation
+    if (orientation?.lock) await orientation.lock('landscape')
+  } catch { /* 不支持横屏锁定，保持页内全屏 */ }
+}
+
+async function closeTrendFullscreen() {
+  trendFullscreen.value = false
+  try {
+    const orientation = (screen as any).orientation
+    if (orientation?.unlock) { try { orientation.unlock() } catch { /* ignore */ } }
+    if (document.fullscreenElement) await document.exitFullscreen()
+  } catch { /* ignore */ }
+}
+
+// 用户通过系统手势/ESC 退出原生全屏时，同步关闭页内遮罩
+function onFullscreenChange() {
+  if (!document.fullscreenElement && trendFullscreen.value) trendFullscreen.value = false
+}
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && trendFullscreen.value) closeTrendFullscreen()
+}
 
 // ── 设置 ──
 function toggle(key: 'dailyReminder' | 'achievementNotification' | 'weeklyReport' | 'schoolSync') {
@@ -174,6 +224,13 @@ function statusLabel(status: string) {
 onMounted(() => {
   loadAllCheckins()
   loadData()
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+  window.addEventListener('keydown', onKeydown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+  window.removeEventListener('keydown', onKeydown)
 })
 </script>
 
@@ -263,7 +320,7 @@ onMounted(() => {
                 <span class="status-badge" :class="ci.status">{{ statusLabel(ci.status) }}</span>
                 <span class="mini-tag">📅 {{ ci.checkDate }}</span>
                 <span class="mini-tag" style="background:#fff3cd;color:#856404">☀️ {{ ci.totalPoints }}</span>
-                <span v-if="ci.taskCount" class="mini-tag" style="background:#d4edda;color:#155724">✅ {{ ci.taskCount }} 任务</span>
+                <span v-if="ci.taskCount" class="mini-tag" style="background:#d4edda;color:#155724">✅ {{ ci.taskCount }} 小任务</span>
                 <span v-if="ci.habitStepCount" class="mini-tag" style="background:#cce5ff;color:#004085">🌱 {{ ci.habitStepCount }} 步</span>
               </div>
             </div>
@@ -271,7 +328,7 @@ onMounted(() => {
               <button class="btn approve-btn" @click="approveCheckin(ci.id)">✅ 通过</button>
               <button class="btn reject-btn" @click="rejectCheckin(ci.id)">❌ 驳回</button>
             </div>
-            <div v-else style="flex-shrink:0">
+            <div v-else-if="ci.approvedAt" style="flex-shrink:0">
               <span class="mini-tag" style="font-size:11px">{{ formatTime(ci.approvedAt) }}</span>
             </div>
           </div>
@@ -292,11 +349,12 @@ onMounted(() => {
                   :required-points="checkinDetails.checkin.requiredPoints"
                   :optional-bonus="checkinDetails.checkin.optionalBonus"
                   :all-done-bonus="checkinDetails.checkin.allDoneBonus"
+                  :habit-points="checkinDetails.checkin.habitPoints"
                 />
                 <div class="summary-stats">
                   <div class="summary-stat">
                     <span class="summary-num">{{ checkinDetails.checkin.taskCount }}</span>
-                    <span class="muted">完成任务</span>
+                    <span class="muted">完成小任务</span>
                   </div>
                   <div class="summary-stat">
                     <span class="summary-num">{{ checkinDetails.checkin.habitStepCount }}</span>
@@ -315,13 +373,13 @@ onMounted(() => {
 
               <!-- 已完成任务 -->
               <div v-if="checkinDetails.completedTasks.length" class="detail-section">
-                <h4>✅ 已完成的任务</h4>
+                <h4>✅ 已完成的小任务（{{ checkinDetails.completedTasks.length }} 项）</h4>
                 <div class="detail-list">
                   <div v-for="task in checkinDetails.completedTasks" :key="task.pk_tasks" class="detail-task-row">
                     <span style="font-size:20px;flex-shrink:0">{{ task.icon || '📋' }}</span>
                     <div style="flex:1;min-width:0">
                       <strong>{{ task.title }}</strong>
-                      <span class="muted" style="display:block;font-size:12px">{{ task.description || '无描述' }}</span>
+                      <span v-if="task.description" class="muted" style="display:block;font-size:12px">{{ task.description }}</span>
                     </div>
                     <span class="mini-tag" style="background:#d4edda;color:#155724">✓ 完成</span>
                     <span class="mini-tag">☀️ +{{ task.reward_points }}</span>
@@ -337,7 +395,7 @@ onMounted(() => {
                     <span style="font-size:20px;flex-shrink:0">{{ task.icon || '📋' }}</span>
                     <div style="flex:1;min-width:0">
                       <strong>{{ task.title }}</strong>
-                      <span class="muted" style="display:block;font-size:12px">{{ task.description || '无描述' }}</span>
+                      <span v-if="task.description" class="muted" style="display:block;font-size:12px">{{ task.description }}</span>
                     </div>
                     <span class="mini-tag" style="background:#f8d7da;color:#721c24">○ 未完成</span>
                   </div>
@@ -402,13 +460,19 @@ onMounted(() => {
           <span class="tag">近 {{ recentCheckins.length }} 次</span>
         </div>
 
-        <!-- CSS 柱状图 -->
-        <div v-if="recentCheckins.length" class="bar-chart">
+        <!-- CSS 柱状图（点击全屏，手机横屏展示更多天） -->
+        <div
+          v-if="recentCheckins.length"
+          class="bar-chart chart-clickable"
+          title="点击查看全屏大图"
+          @click="openTrendFullscreen"
+        >
           <div v-for="ci in recentCheckins" :key="ci.id" class="bar-col">
             <div class="bar-value">{{ ci.totalPoints }}</div>
             <div class="bar-fill" :style="{ height: `${Math.max((ci.totalPoints / maxPoints) * 100, 8)}%` }"></div>
             <div class="bar-label">{{ ci.checkDate }}</div>
           </div>
+          <span class="chart-expand-hint">⛶ 点击全屏</span>
         </div>
         <div v-else class="muted" style="text-align:center;padding:24px">暂无打卡数据</div>
 
@@ -543,6 +607,31 @@ onMounted(() => {
         </a>
       </div>
     </section>
+
+    <!-- ═══ 打卡趋势全屏大图（手机横屏展示更多天）═══ -->
+    <Teleport to="body">
+      <div v-if="trendFullscreen && selectedChild" class="trend-overlay" @click.self="closeTrendFullscreen">
+        <div class="trend-modal">
+          <div class="trend-modal-head">
+            <h3>📈 {{ selectedChild.name }} 的打卡趋势 · 近 {{ trendCheckins.length }} 次</h3>
+            <div class="trend-modal-actions">
+              <span class="mini-tag">☀️ 均值 {{ trendAvgPoints }}</span>
+              <span class="mini-tag">最高 {{ trendMaxPoints }}</span>
+              <button class="btn ghost trend-close-btn" @click="closeTrendFullscreen">✕ 退出全屏</button>
+            </div>
+          </div>
+          <div v-if="trendCheckins.length" class="bar-chart trend-chart">
+            <div v-for="ci in trendCheckins" :key="ci.id" class="bar-col">
+              <div class="bar-value">{{ ci.totalPoints }}</div>
+              <div class="bar-fill" :style="{ height: `${Math.max((ci.totalPoints / trendMaxPoints) * 100, 6)}%` }"></div>
+              <div class="bar-label">{{ shortDate(ci.checkDate) }}</div>
+            </div>
+          </div>
+          <p v-else class="muted" style="text-align:center;padding:32px">暂无打卡数据</p>
+          <p class="trend-tip">📱 手机上横屏可显示更多天数据；退出全屏请点击右上角</p>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -824,6 +913,28 @@ onMounted(() => {
   border-radius: 20px;
   background: #fafafa;
   border: 1px solid var(--line);
+  position: relative;
+}
+.chart-clickable {
+  cursor: pointer;
+  transition: box-shadow .15s ease, border-color .15s ease;
+}
+.chart-clickable:hover {
+  border-color: var(--primary);
+  box-shadow: 0 4px 14px rgba(16,110,0,.1);
+}
+.chart-expand-hint {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+  background: rgba(255,255,255,.85);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 10px;
+  pointer-events: none;
 }
 .bar-col {
   flex: 1;
@@ -975,5 +1086,80 @@ onMounted(() => {
 @media (max-width: 900px) {
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .filter-bar { flex-direction: column; }
+}
+
+/* ── 趋势全屏遮罩 ── */
+.trend-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(20, 30, 18, .55);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.trend-modal {
+  width: 100%;
+  max-width: 1080px;
+  max-height: 96vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 22px;
+  padding: 20px 24px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.25);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.trend-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.trend-modal-head h3 {
+  margin: 0;
+  font-size: 19px;
+}
+.trend-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.trend-close-btn {
+  padding: 6px 14px;
+  font-size: 14px;
+  font-weight: 800;
+}
+.trend-chart {
+  height: min(56vh, 460px);
+  gap: 6px;
+  padding: 26px 6px 30px;
+}
+.trend-chart .bar-value {
+  font-size: 11px;
+}
+.trend-chart .bar-fill {
+  max-width: 34px;
+}
+.trend-chart .bar-label {
+  font-size: 9px;
+}
+.trend-tip {
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+@media (max-width: 700px) {
+  .trend-modal { padding: 14px 12px; border-radius: 16px; }
+  .trend-modal-head h3 { font-size: 16px; }
+  .trend-chart { height: 52vh; gap: 3px; }
+  .trend-chart .bar-fill { max-width: 22px; }
+  .trend-chart .bar-value { font-size: 10px; }
 }
 </style>

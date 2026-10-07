@@ -255,7 +255,7 @@ function formatDateShort(dateStr?: string): string {
               <span style="font-size:24px;flex-shrink:0">{{ task.icon }}</span>
               <div style="min-width:0">
                 <strong>{{ task.title }}</strong>
-                <span class="muted" style="display:block;font-size:13px">{{ task.description || '无描述' }}</span>
+                <span v-if="task.description" class="muted" style="display:block;font-size:13px">{{ task.description }}</span>
                 <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
                   <span class="mini-tag">{{ categoryLabels[task.type] || task.type }}</span>
                   <span class="mini-tag" style="background:#d9f5c8;color:var(--primary)">✓ 已完成</span>

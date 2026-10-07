@@ -255,7 +255,7 @@ function formatTime(iso?: string): string {
                     <span v-if="ci.optionalBonus" class="mini-tag" style="background:#fff8d9;color:#8a6d3b">⭐ +{{ ci.optionalBonus }}</span>
                     <span v-if="ci.allDoneBonus" class="mini-tag" style="background:#ffe0b2;color:#d84315">🎉 +{{ ci.allDoneBonus }}</span>
                     <span v-if="ci.habitPoints" class="mini-tag" style="background:#cce5ff;color:#004085">🌱 +{{ ci.habitPoints }}</span>
-                    <span v-if="ci.taskCount" class="mini-tag" style="background:#d4edda;color:#155724">✅ {{ ci.taskCount }} 项任务</span>
+                    <span v-if="ci.taskCount" class="mini-tag" style="background:#d4edda;color:#155724">✅ {{ ci.taskCount }} 项小任务</span>
                     <span v-if="ci.habitStepCount" class="mini-tag" style="background:#cce5ff;color:#004085">🌱 {{ ci.habitStepCount }} 步习惯</span>
                   </div>
                 </div>
@@ -286,7 +286,7 @@ function formatTime(iso?: string): string {
                     <div class="summary-stats">
                       <div class="summary-stat">
                         <span class="summary-num">{{ checkinDetails.checkin.taskCount }}</span>
-                        <span class="muted">完成任务</span>
+                        <span class="muted">完成小任务</span>
                       </div>
                       <div class="summary-stat">
                         <span class="summary-num">{{ checkinDetails.checkin.habitStepCount }}</span>
@@ -305,13 +305,13 @@ function formatTime(iso?: string): string {
 
                   <!-- Completed tasks -->
                   <div v-if="checkinDetails.completedTasks.length" class="detail-section">
-                    <h4>✅ 已完成的任务</h4>
+                    <h4>✅ 已完成的小任务（{{ checkinDetails.completedTasks.length }} 项）</h4>
                     <div class="detail-list">
                       <div v-for="task in checkinDetails.completedTasks" :key="task.pk_tasks" class="detail-task-row">
                         <span style="font-size:20px;flex-shrink:0">{{ task.icon || '📋' }}</span>
                         <div style="flex:1;min-width:0">
                           <strong>{{ task.title }}</strong>
-                          <span class="muted" style="display:block;font-size:12px">{{ task.description || '提交时记录' }}</span>
+                          <span v-if="task.description" class="muted" style="display:block;font-size:12px">{{ task.description }}</span>
                         </div>
                         <span class="mini-tag" style="background:#d4edda;color:#155724">✓ 完成</span>
                         <span class="mini-tag">☀️ +{{ task.reward_points }}</span>
@@ -327,7 +327,7 @@ function formatTime(iso?: string): string {
                         <span style="font-size:20px;flex-shrink:0">{{ task.icon || '📋' }}</span>
                         <div style="flex:1;min-width:0">
                           <strong>{{ task.title }}</strong>
-                          <span class="muted" style="display:block;font-size:12px">{{ task.description || '无描述' }}</span>
+                          <span v-if="task.description" class="muted" style="display:block;font-size:12px">{{ task.description }}</span>
                         </div>
                         <span class="mini-tag" style="background:#f8d7da;color:#721c24">○ 未完成</span>
                       </div>
@@ -418,7 +418,7 @@ function formatTime(iso?: string): string {
                     <span v-if="h.optionalBonus" class="mini-tag" style="background:#fff8d9;color:#8a6d3b">⭐ +{{ h.optionalBonus }}</span>
                     <span v-if="h.allDoneBonus" class="mini-tag" style="background:#ffe0b2;color:#d84315">🎉 全部完成 +{{ h.allDoneBonus }}</span>
                     <span v-if="h.habitPoints" class="mini-tag" style="background:#cce5ff;color:#004085">🌱 习惯 +{{ h.habitPoints }}</span>
-                    <span v-if="h.taskCount" class="mini-tag">📋 {{ h.taskCount }} 任务</span>
+                    <span v-if="h.taskCount" class="mini-tag">📋 {{ h.taskCount }} 小任务</span>
                     <span class="mini-tag" :class="h.status === 'approved' ? 'status-approved' : 'status-rejected'">
                       {{ h.status === 'approved' ? '已通过' : '已驳回' }}
                     </span>
@@ -426,7 +426,7 @@ function formatTime(iso?: string): string {
                   <div v-if="h.status === 'rejected' && h.rejectReason" class="reject-reason-tip">
                     💬 驳回原因：{{ h.rejectReason }}
                   </div>
-                  <span class="muted" style="font-size:11px;display:block;margin-top:2px">
+                  <span v-if="h.approvedAt" class="muted" style="font-size:11px;display:block;margin-top:2px">
                     {{ formatTime(h.approvedAt) }}
                   </span>
                   <button v-if="h.status === 'rejected'" class="btn ghost reopen-btn" @click="reopenCheckin(h.id)">

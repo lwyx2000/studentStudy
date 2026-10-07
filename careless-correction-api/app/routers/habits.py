@@ -23,6 +23,19 @@ def resolve_target(current_user: User, child_id: int | None, db: Session) -> Use
     return child
 
 
+def _check_habit_permission(habit: HabitSOP, current_user: User, db: Session) -> None:
+    """归属者本人或其家长可操作，否则 403（与 tasks.py 的校验保持一致）"""
+    if habit.fk_users == current_user.pk_users:
+        return
+    owner = db.query(User).filter(
+        User.pk_users == habit.fk_users,
+        User.fk_users_parent == current_user.pk_users,
+        User.role == 'child',
+    ).first()
+    if not owner:
+        raise HTTPException(status_code=403, detail='无权操作该习惯')
+
+
 class StepInput(BaseModel):
     instruction: str
     order: int
@@ -123,6 +136,7 @@ def update_habit(
     )
     if not habit:
         raise HTTPException(status_code=404, detail='习惯不存在')
+    _check_habit_permission(habit, current_user, db)
     if data.title is not None:
         habit.title = data.title
     if data.grade_range is not None:
@@ -208,6 +222,7 @@ def delete_habit(
     )
     if not habit:
         raise HTTPException(status_code=404, detail='习惯不存在')
+    _check_habit_permission(habit, current_user, db)
     habit.active = False
     db.commit()
     return {'ok': True, 'softDelete': True}
@@ -227,6 +242,7 @@ def delete_habit_permanent(
     )
     if not habit:
         raise HTTPException(status_code=404, detail='习惯不存在')
+    _check_habit_permission(habit, current_user, db)
     db.query(SOPStep).filter(SOPStep.fk_habit_sops == habit_id).delete()
     db.delete(habit)
     db.commit()
@@ -275,4 +291,5 @@ def get_habit_detail(
     )
     if not habit:
         raise HTTPException(status_code=404, detail='习惯不存在')
+    _check_habit_permission(habit, current_user, db)
     return {'habit': _habit_to_dict(habit, habit.steps)}

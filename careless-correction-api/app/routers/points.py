@@ -28,6 +28,19 @@ def resolve_target(current_user: User, child_id: int | None, db: Session) -> Use
     return child
 
 
+def _can_manage_reward(item: RewardItem, current_user: User, db: Session) -> bool:
+    """物品归属者本人或其家长可管理（家长替孩子添加的物品 fk_users 是孩子）"""
+    if item.fk_users == current_user.pk_users:
+        return True
+    if current_user.role != 'parent':
+        return False
+    owner = db.query(User).filter(
+        User.pk_users == item.fk_users,
+        User.fk_users_parent == current_user.pk_users,
+    ).first()
+    return owner is not None
+
+
 @router.get('/balance')
 def get_balance(
     child_id: int | None = None,
@@ -91,27 +104,30 @@ def award_points(
 @router.post('/redeem')
 def redeem(
     reward_item_id: int,
+    child_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    """兑换奖励物品：孩子兑换自己的；家长带 child_id 时替孩子兑换（扣孩子的阳光值）"""
+    target = resolve_target(current_user, child_id, db)
     item = db.query(RewardItem).filter(
         RewardItem.pk_reward_items == reward_item_id,
         RewardItem.active == True,
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail='兑换物品不存在或已禁用')
-    if current_user.sunlight_points < item.cost:
+    if target.sunlight_points < item.cost:
         raise HTTPException(status_code=400, detail='阳光值不足')
-    current_user.sunlight_points -= item.cost
+    target.sunlight_points -= item.cost
     history = SunlightHistory(
-        fk_users=current_user.pk_users,
+        fk_users=target.pk_users,
         amount=-item.cost,
         reason=f'兑换：{item.name}',
         type='spend',
     )
     db.add(history)
     db.commit()
-    return {'success': True, 'pointsSpent': item.cost, 'itemName': item.name}
+    return {'success': True, 'pointsSpent': item.cost, 'itemName': item.name, 'balance': target.sunlight_points}
 
 
 @router.get('/rewards')
@@ -136,10 +152,13 @@ def create_reward(
     cost: int,
     description: str | None = None,
     icon: str | None = None,
+    child_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    item = RewardItem(fk_users=current_user.pk_users, name=name, cost=cost, description=description, icon=icon)
+    # 家长替孩子添加时挂到孩子名下，否则孩子端查不到该物品
+    target = resolve_target(current_user, child_id, db)
+    item = RewardItem(fk_users=target.pk_users, name=name, cost=cost, description=description, icon=icon)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -159,9 +178,8 @@ def update_reward(
 ):
     item = db.query(RewardItem).filter(
         RewardItem.pk_reward_items == reward_id,
-        RewardItem.fk_users == current_user.pk_users,
     ).first()
-    if not item:
+    if not item or not _can_manage_reward(item, current_user, db):
         raise HTTPException(status_code=404, detail='物品不存在')
     if name is not None:
         item.name = name
@@ -186,9 +204,8 @@ def delete_reward(
 ):
     item = db.query(RewardItem).filter(
         RewardItem.pk_reward_items == reward_id,
-        RewardItem.fk_users == current_user.pk_users,
     ).first()
-    if not item:
+    if not item or not _can_manage_reward(item, current_user, db):
         raise HTTPException(status_code=404, detail='物品不存在')
     db.delete(item)
     db.commit()
@@ -299,6 +316,9 @@ def award_apples(
     db.add(history)
     db.commit()
     return {'apples': target.apples, 'adjusted': amount}
+
+
+@router.post('/apples/redeem')
 def redeem_apple(
     count: int = 1,
     reason: str = '兑换奖励',
