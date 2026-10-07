@@ -140,30 +140,30 @@ def submit_checkin(
 
     snapshot = _sanitize_completed_tasks_snapshot(completed_tasks)
 
-# 支持同日多次提交：如果当天已有未审批通过的打卡，用新提交覆盖旧记录（保留 id 与 created_at，仅更新积分与快照）
-# 已通过(approved)的记录不允许重复提交，避免同一天重复获得阳光
-existing = db.query(CheckIn).filter(
-    CheckIn.fk_users == current_user.pk_users,
-    CheckIn.check_date == normalized,
-    CheckIn.status.in_(['pending', 'rejected']),
-).order_by(CheckIn.pk_check_ins.desc()).first()
-if existing:
-    if existing.status == 'rejected':
-        existing.status = 'pending'
-        existing.reject_reason = None
-    # 用新提交覆盖旧积分（不累加）
-    existing.total_points = total_points
-    existing.habit_step_count = habit_step_count
-    existing.task_count = task_count
-    existing.required_points = required_points
-    existing.optional_bonus = optional_bonus
-    existing.all_done_bonus = all_done_bonus
-    existing.habit_points = habit_points
-    existing.completed_tasks_snapshot = snapshot
-    existing.approved_at = None
-    db.commit()
-    db.refresh(existing)
-    return {'checkin': existing, 'updated': True}
+    # 支持同日多次提交：如果当天已有未审批通过的打卡，用新提交覆盖旧记录（保留 id 与 created_at，仅更新积分与快照）
+    # 已通过(approved)的记录不允许重复提交，避免同一天重复获得阳光
+    existing = db.query(CheckIn).filter(
+        CheckIn.fk_users == current_user.pk_users,
+        CheckIn.check_date == normalized,
+        CheckIn.status.in_(['pending', 'rejected']),
+    ).order_by(CheckIn.pk_check_ins.desc()).first()
+    if existing:
+        if existing.status == 'rejected':
+            existing.status = 'pending'
+            existing.reject_reason = None
+        # 用新提交覆盖旧积分（不累加）
+        existing.total_points = total_points
+        existing.habit_step_count = habit_step_count
+        existing.task_count = task_count
+        existing.required_points = required_points
+        existing.optional_bonus = optional_bonus
+        existing.all_done_bonus = all_done_bonus
+        existing.habit_points = habit_points
+        existing.completed_tasks_snapshot = snapshot
+        existing.approved_at = None
+        db.commit()
+        db.refresh(existing)
+        return {'checkin': existing, 'updated': True}
 
     # 若同日已有已通过(approved)的打卡，不允许重复提交，避免重复获得阳光
     already_approved = db.query(CheckIn).filter(
