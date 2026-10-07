@@ -86,7 +86,7 @@ async function loadChecklistItems() {
   const tasks = allTasks.value
   const items: ChecklistItem[] = []
 
-  // 构建习惯计分项（按今天匹配的习惯）
+  // 构建习惯计分项（按选中日期匹配的习惯）
   const hItems: HabitChecklistItem[] = []
   for (const h of taskStore.habits) {
     for (const step of h.steps ?? []) {
@@ -155,6 +155,30 @@ const lastSubmitWasResubmit = ref(false)
 // 追踪已提交的小任务 ID（多次提交场景）
 const submittedItemIds = ref<Set<string>>(new Set())
 const submitCount = ref(0)
+
+// ── 习惯计分：勾选完成的习惯步骤按各习惯分值计分 ──
+// 注意：必须声明在 submitChecklist / currentSubmissionPoints 之前（setup 顶层），
+// 否则函数内引用会触发 used-before-declaration，且模板拿不到这些变量
+interface HabitChecklistItem {
+  habitId: string
+  habitTitle: string
+  stepOrder: number
+  instruction: string
+  pointsPerStep: number
+}
+const habitItems = ref<HabitChecklistItem[]>([])
+const checkedHabitSteps = computed(() =>
+  habitItems.value.filter(h => !!checkState.value[`habit-${h.habitId}-${h.stepOrder}`])
+)
+const habitPoints = computed(() =>
+  checkedHabitSteps.value.reduce((sum, h) => sum + h.pointsPerStep, 0)
+)
+
+function toggleHabitItem(h: HabitChecklistItem) {
+  const key = `habit-${h.habitId}-${h.stepOrder}`
+  checkState.value[key] = !checkState.value[key]
+  saveCheckState()
+}
 
 // 本次勾选可获得的积分（实时计算，未提交时显示在按钮上，提交后显示在成功消息中）
 const currentSubmissionPoints = computed(() => {
@@ -351,27 +375,6 @@ async function submitChecklist() {
     submitting.value = false
     submitMessage.value = '继续保持！'
   }
-
-// ── 习惯计分：勾选完成的习惯步骤按各习惯分值计分 ──
-interface HabitChecklistItem {
-  habitId: string
-  habitTitle: string
-  stepOrder: number
-  instruction: string
-  pointsPerStep: number
-}
-const habitItems = ref<HabitChecklistItem[]>([])
-const checkedHabitSteps = computed(() =>
-  habitItems.value.filter(h => !!checkState.value[`habit-${h.habitId}-${h.stepOrder}`])
-)
-const habitPoints = computed(() =>
-  checkedHabitSteps.value.reduce((sum, h) => sum + h.pointsPerStep, 0)
-)
-
-function toggleHabitItem(h: HabitChecklistItem) {
-  const key = `habit-${h.habitId}-${h.stepOrder}`
-  checkState.value[key] = !checkState.value[key]
-  saveCheckState()
 }
 
 // ── Progress ──
