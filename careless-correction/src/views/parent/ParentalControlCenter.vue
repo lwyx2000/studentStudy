@@ -26,7 +26,7 @@ async function loadAllCheckins() {
   try {
     const [pendingRes, historyRes] = await Promise.all([
       api.checkins.getPending(),
-      api.checkins.getHistory(50),
+      api.checkins.getHistory(60),
     ])
     const pending = pendingRes.pending ?? []
     const history = historyRes.history ?? []
@@ -156,10 +156,12 @@ const approvedChildCheckins = computed(() => {
 const recentCheckins = computed(() => approvedChildCheckins.value.slice(0, 7).reverse())
 const maxPoints = computed(() => Math.max(...recentCheckins.value.map(c => c.totalPoints || 0), 1))
 
-// ── 趋势图全屏（手机尝试强制横屏，展示更多天数据）──
+// ── 趋势图全屏（手机尝试强制横屏，原生横屏不可用时用 CSS 旋转模拟横屏，展示更多天数据）──
 const trendFullscreen = ref(false)
-// 全屏大图：近 30 次
-const trendCheckins = computed(() => approvedChildCheckins.value.slice(0, 30).reverse())
+// CSS 旋转模拟横屏（WebView 锁死竖屏 / 不支持 orientation.lock 时的降级方案）
+const trendRotated = ref(false)
+// 全屏大图：近 60 次
+const trendCheckins = computed(() => approvedChildCheckins.value.slice(0, 60).reverse())
 const trendMaxPoints = computed(() => Math.max(...trendCheckins.value.map(c => c.totalPoints || 0), 1))
 const trendAvgPoints = computed(() => {
   const list = trendCheckins.value
@@ -174,6 +176,14 @@ function shortDate(s: string): string {
   return s
 }
 
+/** 原生横屏锁定不可用（Capacitor 默认锁竖屏的 WebView）时，竖屏小屏设备用 CSS 旋转遮罩模拟横屏全屏 */
+function syncTrendOrientation() {
+  if (!trendFullscreen.value) return
+  const portrait = window.matchMedia('(orientation: portrait)').matches
+  const phoneLike = Math.min(window.innerWidth, window.innerHeight) <= 760
+  trendRotated.value = portrait && phoneLike
+}
+
 async function openTrendFullscreen() {
   if (!recentCheckins.value.length) return
   trendFullscreen.value = true
@@ -186,10 +196,14 @@ async function openTrendFullscreen() {
     const orientation = (screen as any).orientation
     if (orientation?.lock) await orientation.lock('landscape')
   } catch { /* 不支持横屏锁定，保持页内全屏 */ }
+  // 等一帧让系统完成旋转后再判断是否需要 CSS 降级；原生旋转可能更慢，再延时重检一次
+  requestAnimationFrame(syncTrendOrientation)
+  setTimeout(syncTrendOrientation, 350)
 }
 
 async function closeTrendFullscreen() {
   trendFullscreen.value = false
+  trendRotated.value = false
   try {
     const orientation = (screen as any).orientation
     if (orientation?.unlock) { try { orientation.unlock() } catch { /* ignore */ } }
@@ -203,6 +217,10 @@ function onFullscreenChange() {
 }
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && trendFullscreen.value) closeTrendFullscreen()
+}
+// 旋转设备/窗口尺寸变化时重新判断横竖屏降级状态
+function onResize() {
+  syncTrendOrientation()
 }
 
 // ── 设置 ──
@@ -226,11 +244,15 @@ onMounted(() => {
   loadData()
   document.addEventListener('fullscreenchange', onFullscreenChange)
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('resize', onResize)
+  window.addEventListener('orientationchange', onResize)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('orientationchange', onResize)
 })
 </script>
 
@@ -610,8 +632,8 @@ onBeforeUnmount(() => {
 
     <!-- ═══ 打卡趋势全屏大图（手机横屏展示更多天）═══ -->
     <Teleport to="body">
-      <div v-if="trendFullscreen && selectedChild" class="trend-overlay" @click.self="closeTrendFullscreen">
-        <div class="trend-modal">
+      <div v-if="trendFullscreen && selectedChild" class="trend-overlay" :class="{ 'trend-overlay-rotated': trendRotated }" @click.self="closeTrendFullscreen">
+        <div class="trend-modal" :class="{ 'trend-modal-rotated': trendRotated }">
           <div class="trend-modal-head">
             <h3>📈 {{ selectedChild.name }} 的打卡趋势 · 近 {{ trendCheckins.length }} 次</h3>
             <div class="trend-modal-actions">
@@ -628,7 +650,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <p v-else class="muted" style="text-align:center;padding:32px">暂无打卡数据</p>
-          <p class="trend-tip">📱 手机上横屏可显示更多天数据；退出全屏请点击右上角</p>
+          <p class="trend-tip">{{ trendRotated ? '🔄 已模拟横屏全屏，可左右滑动查看更多天；点右上角退出' : '📱 手机横屏可显示更多天数据；退出全屏请点击右上角' }}</p>
         </div>
       </div>
     </Teleport>
@@ -1137,17 +1159,50 @@ onBeforeUnmount(() => {
 }
 .trend-chart {
   height: min(56vh, 460px);
-  gap: 6px;
+  gap: 3px;
   padding: 26px 6px 30px;
 }
 .trend-chart .bar-value {
-  font-size: 11px;
+  font-size: 10px;
 }
 .trend-chart .bar-fill {
-  max-width: 34px;
+  max-width: 20px;
 }
 .trend-chart .bar-label {
-  font-size: 9px;
+  font-size: 8.5px;
+}
+/* 全屏大图天数较多时允许横向滑动，避免柱子挤到不可读 */
+.trend-chart {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.trend-chart .bar-col {
+  flex: 0 0 auto;
+  min-width: 14px;
+}
+/* ── CSS 旋转模拟横屏（原生横屏锁定不可用的竖屏 WebView 降级）── */
+.trend-overlay-rotated {
+  padding: 0;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  touch-action: none;
+}
+.trend-modal-rotated {
+  width: 100dvh;
+  height: 100vw;
+  max-width: none;
+  max-height: none;
+  transform: rotate(90deg);
+  transform-origin: center;
+  border-radius: 0;
+  touch-action: auto;
+  padding: 12px 4vw;
+  gap: 10px;
+}
+.trend-modal-rotated .trend-chart {
+  flex: 1;
+  height: auto;
+  min-height: 0;
 }
 .trend-tip {
   margin: 0;
