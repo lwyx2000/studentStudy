@@ -24,8 +24,10 @@ const isEditing = !isToday
 
 // ── Daily check state (localStorage, keyed by date) ──
 const activeDateObj = queryDate ? new Date(queryDate.replace(/-/g, '/')) : new Date()
-
-const checkStateKey = `cc-checklist-${activeDate}`
+// localStorage 键统一归一化为 zh-CN 本地日期格式（与当天打卡时自动生成的键一致），
+// 从历史记录（服务端返回 YYYY-MM-DD）进入编辑页时才能恢复当天的勾选状态
+const lsDateKey = activeDateObj.toLocaleDateString('zh-CN')
+const checkStateKey = `cc-checklist-${lsDateKey}`
 
 function loadCheckState(): Record<string, boolean> {
   try {
@@ -142,7 +144,7 @@ async function loadChecklistItems() {
 }
 
 // ── Submitted state (persists in localStorage) ──
-const submittedKey = `cc-checklist-submitted-${activeDate}`
+const submittedKey = `cc-checklist-submitted-${lsDateKey}`
 const submitted = ref<boolean>(localStorage.getItem(submittedKey) === 'true')
 const submitting = ref(false)
 const submitMessage = ref('')
@@ -296,7 +298,7 @@ async function submitChecklist() {
   submitted.value = true
   submitting.value = false
   localStorage.setItem(submittedKey, 'true')
-  localStorage.setItem(`cc-checklist-count-${activeDate}`, String(submitCount.value))
+  localStorage.setItem(`cc-checklist-count-${lsDateKey}`, String(submitCount.value))
 
   // Submit check-in to backend for parent approval
   if (totalPoints > 0) {
@@ -444,7 +446,7 @@ onMounted(async () => {
 
 /** 从本地存储恢复当日提交统计（跨页面返回时保持「再提交」入口） */
 function restoreSubmitStats() {
-  const savedCount = Number(localStorage.getItem(`cc-checklist-count-${activeDate}`) ?? '0')
+  const savedCount = Number(localStorage.getItem(`cc-checklist-count-${lsDateKey}`) ?? '0')
   if (Number.isFinite(savedCount) && savedCount > 0) {
     submitCount.value = savedCount
     submitted.value = true
