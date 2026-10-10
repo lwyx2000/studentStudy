@@ -16,6 +16,8 @@ const password = ref('')
 const confirmPassword = ref('')
 const error = ref('')
 const loading = ref(false)
+// 自动登录已在后台进行（隐藏液表单，避免用户误删改自动填入的凭据）
+const autoLogging = ref(false)
 // 保存账号密码（加密存前端，5 天过期）
 const savePwd = ref(false)
 
@@ -26,6 +28,10 @@ onMounted(() => {
     name.value = cred.username
     password.value = cred.password
     savePwd.value = true
+
+    // ★ 已存凭据未过期：直接静默自动登录，不打扰用户手动点击
+    autoLogging.value = true
+    submit().finally(() => { autoLogging.value = false })
   }
 })
 
@@ -65,6 +71,11 @@ async function submit() {
     router.replace(userStore.profile.role === 'parent' ? '/parent' : '/dashboard')
   } catch (e: any) {
     error.value = e.message || '操作失败，请重试'
+    // 自动登录失败（密码被改/服务器不可达）：清空错误提示，保留表单回填，让用户手动登录或修改密码
+    if (autoLogging.value) {
+      error.value = '自动登录失败，请重新输入密码登录'
+      password.value = ''
+    }
   } finally {
     loading.value = false
   }
@@ -154,9 +165,17 @@ const particlesOptions: ISourceOptions = {
           <div class="tab-slider" :class="{ right: mode === 'register' }" />
         </div>
 
+        <!-- ★ 自动登录中：卡片仅显示进度提示，隐藏表单避免误改自动填入的凭据 -->
+        <div v-if="autoLogging" class="auto-login-hint">
+          <span class="dot-loader">
+            <i /><i /><i />
+          </span>
+          <span>正在自动登录…</span>
+        </div>
+
         <!-- 表单 (带切换动画) -->
         <Transition name="form-slide" mode="out-in">
-          <div :key="mode" class="form">
+          <div v-if="!autoLogging" :key="mode" class="form">
             <label class="field">
               <span>用户名</span>
               <div class="input-row">
@@ -210,6 +229,35 @@ const particlesOptions: ISourceOptions = {
 </template>
 
 <style scoped>
+/* ── 自动登录中提示 ── */
+.auto-login-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 0 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted, #666);
+}
+.auto-login-hint .dot-loader {
+  display: inline-flex;
+  gap: 5px;
+}
+.auto-login-hint .dot-loader i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary, #10b981);
+  animation: dot-pulse 1.1s ease-in-out infinite;
+}
+.auto-login-hint .dot-loader i:nth-child(2) { animation-delay: 0.18s; }
+.auto-login-hint .dot-loader i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes dot-pulse {
+  0%, 60%, 100% { opacity: 0.35; transform: scale(0.8); }
+  30% { opacity: 1; transform: scale(1.15); }
+}
+
 /* ── 页面容器 ── */
 .login-page {
   min-height: 100vh;

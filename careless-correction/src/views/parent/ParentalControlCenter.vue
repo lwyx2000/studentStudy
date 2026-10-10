@@ -184,19 +184,35 @@ function syncTrendOrientation() {
   trendRotated.value = portrait && phoneLike
 }
 
+/** 原生全屏（Fullscreen API）是否真正生效；WebView 里经常被拒，据此决定要不要取消遮罩圆角/留白 */
+const nativeFullscreenActive = ref(false)
+
+function isFullscreenLikelySupported(): boolean {
+  const doc = document as any
+  return !!(
+    document.documentElement.requestFullscreen ||
+    doc.documentElement.webkitRequestFullscreen ||
+    doc.documentElement.msRequestFullscreen
+  )
+}
+
 async function openTrendFullscreen() {
   if (!recentCheckins.value.length) return
   trendFullscreen.value = true
+  // 1) 先尝试原生全屏。部分 WebView 会抛 NotSupportedError / 直接 reject，
+  //    不能让这个失败连带跳过下面的横屏锁定，所以单独 try/catch。
   try {
-    // 先进入原生全屏（部分 WebView 不支持，降级为页内全屏遮罩），再尝试锁定横屏
-    if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+    if (isFullscreenLikelySupported() && !document.fullscreenElement) {
       await document.documentElement.requestFullscreen()
+      nativeFullscreenActive.value = true
     }
-    // 方向锁定只有全屏下才生效；iOS 等平台不支持，静默降级
+  } catch { /* 原生全屏不支持，保持页内全屏遮罩 */ }
+  // 2) 再尝试横屏锁定（全屏下才生效；iOS 等平台不支持，静默降级）
+  try {
     const orientation = (screen as any).orientation
     if (orientation?.lock) await orientation.lock('landscape')
   } catch { /* 不支持横屏锁定，保持页内全屏 */ }
-  // 等一帧让系统完成旋转后再判断是否需要 CSS 降级；原生旋转可能更慢，再延时重检一次
+  // 3) 等一帧让系统完成旋转后再判断是否需要 CSS 降级；原生旋转可能更慢，再延时重检一次
   requestAnimationFrame(syncTrendOrientation)
   setTimeout(syncTrendOrientation, 350)
 }
@@ -204,6 +220,7 @@ async function openTrendFullscreen() {
 async function closeTrendFullscreen() {
   trendFullscreen.value = false
   trendRotated.value = false
+  nativeFullscreenActive.value = false
   try {
     const orientation = (screen as any).orientation
     if (orientation?.unlock) { try { orientation.unlock() } catch { /* ignore */ } }
@@ -213,6 +230,7 @@ async function closeTrendFullscreen() {
 
 // 用户通过系统手势/ESC 退出原生全屏时，同步关闭页内遮罩
 function onFullscreenChange() {
+  nativeFullscreenActive.value = !!document.fullscreenElement
   if (!document.fullscreenElement && trendFullscreen.value) trendFullscreen.value = false
 }
 function onKeydown(e: KeyboardEvent) {
@@ -632,8 +650,8 @@ onBeforeUnmount(() => {
 
     <!-- ═══ 打卡趋势全屏大图（手机横屏展示更多天）═══ -->
     <Teleport to="body">
-      <div v-if="trendFullscreen && selectedChild" class="trend-overlay" :class="{ 'trend-overlay-rotated': trendRotated }" @click.self="closeTrendFullscreen">
-        <div class="trend-modal" :class="{ 'trend-modal-rotated': trendRotated }">
+      <div v-if="trendFullscreen && selectedChild" class="trend-overlay" :class="{ 'trend-overlay-rotated': trendRotated, 'trend-overlay-fullbleed': !nativeFullscreenActive }" @click.self="closeTrendFullscreen">
+        <div class="trend-modal" :class="{ 'trend-modal-rotated': trendRotated, 'trend-modal-fullbleed': !nativeFullscreenActive }">
           <div class="trend-modal-head">
             <h3>📈 {{ selectedChild.name }} 的打卡趋势 · 近 {{ trendCheckins.length }} 次</h3>
             <div class="trend-modal-actions">
@@ -1134,6 +1152,27 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+/* WebView 拒绝原生全屏时的兑底：遮罩和弹层都真正铺满整屏，不留边距/透明背景 */
+.trend-overlay-fullbleed {
+  padding: 0;
+  background: #fff;
+  backdrop-filter: none;
+}
+.trend-modal-fullbleed {
+  max-width: none;
+  max-height: none;
+  height: 100dvh;
+  width: 100dvw;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: hidden;
+}
+/* 满屏时图表撑满剩余高度，而不是固定 56vh */
+.trend-modal-fullbleed .trend-chart {
+  flex: 1;
+  height: auto;
+  min-height: 0;
 }
 .trend-modal-head {
   display: flex;

@@ -276,6 +276,26 @@ const allRequiredDone = computed(() =>
   requiredItems.value.length > 0 && checkedRequiredItems.value.length === requiredItems.value.length
 )
 
+// ── 打卡成功即时反馈：阳光掉落 + 阳光值 +N 浮层动画 ──
+const celebration = ref<{ active: boolean; points: number }>({ active: false, points: 0 })
+const celebrationSuns = ref<{ left: number; delay: number; size: number }[]>([])
+let celebrationTimer: ReturnType<typeof setTimeout> | null = null
+
+function celebrate(points: number) {
+  // 掉落的小太阳数量随本次得分波动，上限不夸张
+  const count = Math.max(1, Math.min(Math.round(points / 2), 14))
+  celebrationSuns.value = Array.from({ length: count }, (_, i) => ({
+    left: 6 + Math.random() * 88,
+    delay: (i * 90 + Math.random() * 120) / 1000,
+    size: 26 + Math.random() * 14,
+  }))
+  celebration.value = { active: true, points }
+  if (celebrationTimer) clearTimeout(celebrationTimer)
+  celebrationTimer = setTimeout(() => {
+    celebration.value = { active: false, points: 0 }
+  }, 3200)
+}
+
 async function submitChecklist() {
   if (submitting.value || justSubmitted.value) return
   // 至少勾选一项（必做或可选均可）才能提交
@@ -347,6 +367,9 @@ async function submitChecklist() {
       localStorage.setItem(submittedKey, 'true')
       localStorage.setItem(`cc-checklist-count-${lsDateKey}`, String(submitCount.value))
       submitting.value = false
+
+      // ★ 提交成功立刻给正反馈：阳光掉落 + 计分浮层
+      celebrate(totalPoints)
 
       const extras: string[] = []
       if (allRequiredDone.value) extras.push(`全部完成奖励 +${ALL_DONE_BONUS_POINTS}`)
@@ -685,6 +708,22 @@ function restoreSubmitStats() {
       </div>
     </template>
   </div>
+
+  <!-- ★ 打卡成功即时奖励：阳光掉落 + 阳光值 +N 浮层（Teleport 保证铺满全屏且置顶） -->
+  <Teleport to="body">
+    <div v-if="celebration.active" class="celebrate-layer">
+      <span
+        v-for="(s, i) in celebrationSuns"
+        :key="i"
+        class="celebrate-sun"
+        :style="{ left: `${s.left}%`, animationDelay: `${s.delay}s`, fontSize: `${s.size}px` }"
+      >☀️</span>
+      <div class="celebrate-score">
+        <span class="celebrate-score-num">+{{ celebration.points }}</span>
+        <span class="celebrate-score-label">阳光值</span>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -1080,5 +1119,54 @@ function restoreSubmitStats() {
   .print-header h1 { font-size: 24px; }
   .print-section h2 { font-size: 18px; }
 
+}
+
+/* ── 打卡成功即时奖励动画 ── */
+.celebrate-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  overflow: hidden;
+}
+.celebrate-sun {
+  position: absolute;
+  top: -8vh;
+  font-size: 32px;
+  filter: drop-shadow(0 0 6px rgba(255, 193, 7, .8));
+  animation: sun-drop 1.5s cubic-bezier(.35, .68, .72, 1.02) forwards;
+}
+@keyframes sun-drop {
+  0% { transform: translateY(0) rotate(0deg) scale(.6); opacity: 0; }
+  12% { opacity: 1; }
+  60% { transform: translateY(55vh) rotate(120deg) scale(1.15); }
+  100% { transform: translateY(112vh) rotate(200deg) scale(.9); opacity: 0; }
+}
+.celebrate-score {
+  position: absolute;
+  top: 42%;
+  left: 50%;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  animation: score-pop 2.4s cubic-bezier(.22, 1.1, .38, 1) forwards;
+}
+.celebrate-score-num {
+  font-size: 44px;
+  font-weight: 900;
+  color: #ffb300;
+  text-shadow: 0 2px 10px rgba(255, 160, 0, .55), 0 0 2px #fff;
+}
+.celebrate-score-label {
+  font-size: 18px;
+  font-weight: 800;
+  color: #2e7d32;
+}
+@keyframes score-pop {
+  0% { transform: translate(-50%, 0) scale(.5); opacity: 0; }
+  16% { transform: translate(-50%, -18px) scale(1.18); opacity: 1; }
+  30% { transform: translate(-50%, 0) scale(1); }
+  78% { opacity: 1; }
+  100% { transform: translate(-50%, -30px) scale(.92); opacity: 0; }
 }
 </style>

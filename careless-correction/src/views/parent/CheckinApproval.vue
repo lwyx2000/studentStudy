@@ -14,8 +14,8 @@ const loading = ref(false)
 const activeTab = ref<'pending' | 'history'>('pending')
 
 // ── Pagination ──
-const PENDING_PAGE_SIZE = 20
-const HISTORY_PAGE_SIZE = 20
+const PENDING_PAGE_SIZE = 10
+const HISTORY_PAGE_SIZE = 10
 const pendingOffset = ref(0)
 const pendingTotal = ref(0)
 const pendingPage = computed(() => Math.floor(pendingOffset.value / PENDING_PAGE_SIZE) + 1)
