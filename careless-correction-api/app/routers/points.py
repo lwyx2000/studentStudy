@@ -328,7 +328,8 @@ def redeem_apple(
 ):
     """兑换苹果（1 苹果 = 1 元）。
 
-    孩子调用时只创建申请，等待家长审批；家长调用（带 child_id）可直接代为兑换。
+    孩子调用时创建申请并立即预扣苹果（防审批期间把苹果花超），家长驳回时退回；
+    家长调用（带 child_id）可直接代为兑换。
     """
     if count <= 0:
         raise HTTPException(status_code=400, detail='兑换数量必须大于 0')
@@ -353,7 +354,7 @@ def redeem_apple(
             'redeemed': count,
         }
 
-    # 孩子提交：只创建申请，不扣减，待家长审批
+    # 孩子提交：创建申请并立即预扣苹果，待家长审批；驳回时退回
     # 防重复：同孩子已有 pending 申请时拒绝重复提交
     existing_pending = db.query(AppleRedemptionRequest).filter(
         AppleRedemptionRequest.fk_users == target.pk_users,
@@ -368,6 +369,14 @@ def redeem_apple(
         status='pending',
     )
     db.add(req)
+    # 预扣苹果：审批期间这部分苹果不可再被消耗/兑换
+    target.apples -= count
+    db.add(AppleHistory(
+        fk_users=target.pk_users,
+        amount=-count,
+        reason=f'兑换申请预扣 {count} 个苹果（待家长审核）',
+        type='redeem',
+    ))
     db.commit()
     db.refresh(req)
     return {
@@ -375,7 +384,8 @@ def redeem_apple(
         'submitted': True,
         'requestId': req.pk_apple_redemption_requests,
         'apples': target.apples,
-        'message': '兑换申请已提交，等待家长审批',
+        'deducted': count,
+        'message': '兑换申请已提交，苹果已暂时扣除，等待家长审批（驳回将退回）',
     }
 
 
@@ -421,7 +431,7 @@ def approve_apple_redemption(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """家长审批通过苹果兑换申请：扣减苹果并记录。"""
+    """家长审批通过苹果兑换申请：苹果在提交申请时已预扣，这里仅确认通过。"""
     if current_user.role != 'parent':
         raise HTTPException(status_code=403, detail='只有家长可以审批兑换申请')
     req = db.query(AppleRedemptionRequest).filter(
@@ -434,19 +444,35 @@ def approve_apple_redemption(
         raise HTTPException(status_code=403, detail='无权审批该申请')
     if req.status != 'pending':
         raise HTTPException(status_code=400, detail='该申请已处理')
-    if child.apples < req.count:
-        req.status = 'rejected'
-        db.commit()
-        raise HTTPException(status_code=400, detail='孩子苹果数量不足，申请已自动驳回')
-    child.apples -= req.count
+    # 苹果已在提交申请时预扣，通过时不再重复扣减，只更新状态与流水描述
     req.status = 'approved'
     req.approved_at = datetime.now()
-    db.add(AppleHistory(
-        fk_users=child.pk_users,
-        amount=-req.count,
-        reason=req.reason or f'兑换 {req.count} 元',
-        type='redeem',
-    ))
+    hist = (
+        db.query(AppleHistory)
+        .filter(
+            AppleHistory.fk_users == child.pk_users,
+            AppleHistory.type == 'redeem',
+            AppleHistory.amount == -req.count,
+            AppleHistory.reason.like('兑换申请预扣%'),
+        )
+        .order_by(AppleHistory.pk_apple_history.desc())
+        .first()
+    )
+    if hist:
+        hist.reason = f'兑换 {req.count} 元（家长已审核）'
+    else:
+        # 兼容旧数据（提交时未预扣的历史申请）：通过时才扣减
+        if child.apples < req.count:
+            req.status = 'rejected'
+            db.commit()
+            raise HTTPException(status_code=400, detail='孩子苹果数量不足，申请已自动驳回')
+        child.apples -= req.count
+        db.add(AppleHistory(
+            fk_users=child.pk_users,
+            amount=-req.count,
+            reason=req.reason or f'兑换 {req.count} 元',
+            type='redeem',
+        ))
     db.commit()
     return {'success': True, 'childName': child.name, 'redeemed': req.count, 'apples': child.apples}
 
@@ -457,7 +483,7 @@ def reject_apple_redemption(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """家长驳回苹果兑换申请。"""
+    """家长驳回苹果兑换申请：退回提交时预扣的苹果。"""
     if current_user.role != 'parent':
         raise HTTPException(status_code=403, detail='只有家长可以审批兑换申请')
     req = db.query(AppleRedemptionRequest).filter(
@@ -471,8 +497,16 @@ def reject_apple_redemption(
     if req.status != 'pending':
         raise HTTPException(status_code=400, detail='该申请已处理')
     req.status = 'rejected'
+    # 退回提交申请时预扣的苹果
+    child.apples += req.count
+    db.add(AppleHistory(
+        fk_users=child.pk_users,
+        amount=req.count,
+        reason=f'兑换申请被驳回，退回 {req.count} 个苹果',
+        type='earn',
+    ))
     db.commit()
-    return {'success': True, 'childName': child.name}
+    return {'success': True, 'childName': child.name, 'refunded': req.count, 'apples': child.apples}
 
 
 # ══════════════════════════════════════════════════════════════

@@ -297,15 +297,28 @@ export const useUserStore = defineStore('user', () => {
     return growAppleInFlight || redeemAppleInFlight
   }
 
-  /** 孩子端兑换苹果：现在提交申请，等待家长审批后扣苹果 */
+  /** 孩子端兑换苹果：提交申请并立即预扣苹果（驳回时后端退回） */
   function redeemApple(count: number, reason: string) {
     if (redeemAppleInFlight) return 'busy' as const
     if (count <= 0 || apples.value < count) return false
     redeemAppleInFlight = true
+    // 乐观预扣：与后端提交时的预扣行为保持一致，避免等待审批期间重复使用
+    const previousApples = apples.value
+    apples.value -= count
+    appleHistory.value.unshift({
+      id: `ap-redeem-${Date.now()}`,
+      amount: -count,
+      reason: `兑换申请预扣 ${count} 个苹果（待家长审核）`,
+      type: 'redeem',
+      timestamp: new Date().toISOString(),
+    })
     return api.points.redeemApple(count, reason).then((res: any) => {
       if (res?.apples !== undefined) apples.value = res.apples
       return 'submitted' as const
     }).catch((e: any) => {
+      // 提交失败回滚预扣（如已有待审批申请 / 苹果不足）
+      apples.value = previousApples
+      appleHistory.value.shift()
       // 已经有待审批申请等情况：把后端错误信息抛给调用方展示
       throw new Error(e?.message || '提交兑换申请失败')
     }).finally(() => {

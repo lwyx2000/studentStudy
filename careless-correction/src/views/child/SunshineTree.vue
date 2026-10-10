@@ -179,7 +179,7 @@ async function confirmRedeem() {
       redeemError.value = '苹果数量不足或数量无效'
       return
     }
-    redeemSuccess.value = '📨 兑换申请已提交，等爸爸妈妈审批通过后就能兑换啦！'
+    redeemSuccess.value = '📨 兑换申请已提交，苹果已暂时扣除，等爸爸妈妈审批通过即可兑换（驳回会自动退回）！'
     setTimeout(() => { showRedeemModal.value = false }, 2200)
     loadRedemptionRequests()
   } catch (e: any) {
@@ -206,6 +206,42 @@ const earnHistory = computed(() =>
 const redeemHistory = computed(() =>
   userStore.appleHistory.filter(r => r.type === 'redeem')
 )
+
+// ── 兑换记录列表：申请（含待审核）+ 苹果流水合并展示，提交申请后立即可见 ──
+interface RedemptionRecordRow {
+  key: string
+  count: number
+  text: string
+  date: string
+  status?: 'pending' | 'approved' | 'rejected'
+}
+const redemptionRecords = computed<RedemptionRecordRow[]>(() => {
+  const rows: RedemptionRecordRow[] = []
+  // 兑换申请：待审核/已通过/已驳回都展示（苹果在提交时已预扣，驳回自动退回）
+  for (const r of redemptionRequests.value) {
+    const d = r.createdAt ? new Date(r.createdAt) : null
+    rows.push({
+      key: `req-${r.id}`,
+      count: r.count,
+      text: r.reason || `和爸爸妈妈兑换 ${r.count} 元`,
+      date: d && !isNaN(d.getTime()) ? d.toLocaleDateString('zh-CN') : '',
+      status: r.status,
+    })
+  }
+  // 苹果流水中与兑换相关的记录（预扣/已审核/驳回退回；申请产生的预扣记录不重复展示，
+  // 因为同一笔申请已在上方列出；退回记录则单独列出方便孩子核对）
+  for (const rec of redeemHistory.value) {
+    if (rec.reason.includes('兑换申请预扣')) continue
+    const d = new Date(rec.timestamp)
+    rows.push({
+      key: `his-${rec.id}`,
+      count: Math.abs(rec.amount),
+      text: rec.reason,
+      date: isNaN(d.getTime()) ? '' : d.toLocaleDateString('zh-CN'),
+    })
+  }
+  return rows.slice(0, 20)
+})
 
 // ══════════════════════════════════════════════════════════════
 //  Three.js 场景 — 漫画卡通渲染（MeshToonMaterial + 描边壳），全部程序化建模
@@ -1345,17 +1381,18 @@ onUnmounted(() => {
         <p v-else class="muted empty-mini">还没有种出苹果，去收集阳光吧！</p>
       </section>
 
-      <!-- Redeem History -->
+      <!-- Redeem History：含待审核的兑换申请 -->
       <section class="panel">
         <div class="card-title">
           <h2>💰 兑换记录</h2>
-          <span class="tag">{{ redeemHistory.length }} 次</span>
+          <span class="tag">{{ redemptionRecords.length }} 条</span>
         </div>
-        <div v-if="redeemHistory.length" class="history-list">
-          <div v-for="record in redeemHistory.slice(0, 20)" :key="record.id" class="history-row-mini">
+        <div v-if="redemptionRecords.length" class="history-list">
+          <div v-for="record in redemptionRecords" :key="record.key" class="history-row-mini">
             <span class="row-icon">💰</span>
-            <span class="row-text">{{ record.reason }}</span>
-            <span class="row-date">{{ new Date(record.timestamp).toLocaleDateString('zh-CN') }}</span>
+            <span class="row-text">{{ record.text }}</span>
+            <span v-if="record.status" class="redemption-status" :class="record.status">{{ statusLabel(record.status) }}</span>
+            <span class="row-date">{{ record.date }}</span>
           </div>
         </div>
         <p v-else class="muted empty-mini">还没有兑换过，攒够苹果找爸爸妈妈换东西吧！</p>

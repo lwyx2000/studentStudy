@@ -408,7 +408,7 @@ function addItem() {
             <span class="tag pulse-tag">{{ pendingRedemptionCount }} 条待审批</span>
           </div>
           <p class="muted" style="font-size:13px;margin-bottom:10px">
-            孩子在「阳光树」提交的苹果兑换申请会出现在这里，审批通过后才会扣苹果（1 苹果 = 1 元）。
+            孩子在「阳光树」提交的苹果兑换申请会出现在这里；提交时苹果已暂时扣除（1 苹果 = 1 元），通过后确认扣除，驳回会自动退回。
           </p>
           <div class="list">
             <div v-for="r in redemptionRequests.filter(x => x.status === 'pending')" :key="r.id" class="list-row">

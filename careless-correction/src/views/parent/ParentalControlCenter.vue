@@ -50,6 +50,27 @@ const filteredCheckins = computed(() => {
   return list
 })
 
+// ── 审批列表分页：每页 10 条 ──
+const CHECKINS_PAGE_SIZE = 10
+const checkinsPage = ref(1)
+const totalCheckinsPages = computed(() => Math.max(1, Math.ceil(filteredCheckins.value.length / CHECKINS_PAGE_SIZE)))
+const pagedCheckins = computed(() => {
+  const start = (checkinsPage.value - 1) * CHECKINS_PAGE_SIZE
+  return filteredCheckins.value.slice(start, start + CHECKINS_PAGE_SIZE)
+})
+// 切换筛选条件时回到第一页；页码越界时自动夹取
+watch([filterStatus, filterChildId], () => { checkinsPage.value = 1 })
+watch(filteredCheckins, (list) => {
+  const maxPage = Math.max(1, Math.ceil(list.length / CHECKINS_PAGE_SIZE))
+  if (checkinsPage.value > maxPage) checkinsPage.value = maxPage
+})
+function turnPage(delta: number) {
+  checkinsPage.value = Math.min(Math.max(1, checkinsPage.value + delta), totalCheckinsPages.value)
+  // 翻页后收起展开的详情，避免歧义
+  expandedCheckinId.value = null
+  checkinDetails.value = null
+}
+
 const pendingCount = computed(() => allCheckins.value.filter(c => c.status === 'pending').length)
 const approvedCount = computed(() => allCheckins.value.filter(c => c.status === 'approved').length)
 const rejectedCount = computed(() => allCheckins.value.filter(c => c.status === 'rejected').length)
@@ -184,35 +205,19 @@ function syncTrendOrientation() {
   trendRotated.value = portrait && phoneLike
 }
 
-/** 原生全屏（Fullscreen API）是否真正生效；WebView 里经常被拒，据此决定要不要取消遮罩圆角/留白 */
-const nativeFullscreenActive = ref(false)
-
-function isFullscreenLikelySupported(): boolean {
-  const doc = document as any
-  return !!(
-    document.documentElement.requestFullscreen ||
-    doc.documentElement.webkitRequestFullscreen ||
-    doc.documentElement.msRequestFullscreen
-  )
-}
-
 async function openTrendFullscreen() {
   if (!recentCheckins.value.length) return
   trendFullscreen.value = true
-  // 1) 先尝试原生全屏。部分 WebView 会抛 NotSupportedError / 直接 reject，
-  //    不能让这个失败连带跳过下面的横屏锁定，所以单独 try/catch。
   try {
-    if (isFullscreenLikelySupported() && !document.fullscreenElement) {
+    // 先进入原生全屏（部分 WebView 不支持，降级为页内全屏遮罩），再尝试锁定横屏
+    if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
       await document.documentElement.requestFullscreen()
-      nativeFullscreenActive.value = true
     }
-  } catch { /* 原生全屏不支持，保持页内全屏遮罩 */ }
-  // 2) 再尝试横屏锁定（全屏下才生效；iOS 等平台不支持，静默降级）
-  try {
+    // 方向锁定只有全屏下才生效；iOS 等平台不支持，静默降级
     const orientation = (screen as any).orientation
     if (orientation?.lock) await orientation.lock('landscape')
   } catch { /* 不支持横屏锁定，保持页内全屏 */ }
-  // 3) 等一帧让系统完成旋转后再判断是否需要 CSS 降级；原生旋转可能更慢，再延时重检一次
+  // 等一帧让系统完成旋转后再判断是否需要 CSS 降级；原生旋转可能更慢，再延时重检一次
   requestAnimationFrame(syncTrendOrientation)
   setTimeout(syncTrendOrientation, 350)
 }
@@ -220,7 +225,6 @@ async function openTrendFullscreen() {
 async function closeTrendFullscreen() {
   trendFullscreen.value = false
   trendRotated.value = false
-  nativeFullscreenActive.value = false
   try {
     const orientation = (screen as any).orientation
     if (orientation?.unlock) { try { orientation.unlock() } catch { /* ignore */ } }
@@ -230,7 +234,6 @@ async function closeTrendFullscreen() {
 
 // 用户通过系统手势/ESC 退出原生全屏时，同步关闭页内遮罩
 function onFullscreenChange() {
-  nativeFullscreenActive.value = !!document.fullscreenElement
   if (!document.fullscreenElement && trendFullscreen.value) trendFullscreen.value = false
 }
 function onKeydown(e: KeyboardEvent) {
@@ -343,9 +346,9 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- 审批列表 -->
+      <!-- 审批列表（每页 10 条） -->
       <div v-if="filteredCheckins.length" class="checkin-list">
-        <div v-for="ci in filteredCheckins" :key="ci.id" class="checkin-item-wrap" :class="ci.status">
+        <div v-for="ci in pagedCheckins" :key="ci.id" class="checkin-item-wrap" :class="ci.status">
           <!-- 头部 -->
           <div
             class="list-row checkin-row"
@@ -483,7 +486,13 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
-      <div v-else class="empty-state">
+      <!-- 分页控件 -->
+      <div v-if="filteredCheckins.length > CHECKINS_PAGE_SIZE" class="pagination-bar">
+        <button class="page-btn" :disabled="checkinsPage <= 1" @click="turnPage(-1)">‹ 上一页</button>
+        <span class="page-info">第 {{ checkinsPage }} / {{ totalCheckinsPages }} 页 · 共 {{ filteredCheckins.length }} 条</span>
+        <button class="page-btn" :disabled="checkinsPage >= totalCheckinsPages" @click="turnPage(1)">下一页 ›</button>
+      </div>
+      <div v-if="!filteredCheckins.length" class="empty-state">
         <span style="font-size:48px;display:block;margin-bottom:8px">📭</span>
         <p class="muted">暂无{{ filterStatus !== 'all' ? statusLabel(filterStatus) : '' }}打卡记录</p>
       </div>
@@ -650,8 +659,8 @@ onBeforeUnmount(() => {
 
     <!-- ═══ 打卡趋势全屏大图（手机横屏展示更多天）═══ -->
     <Teleport to="body">
-      <div v-if="trendFullscreen && selectedChild" class="trend-overlay" :class="{ 'trend-overlay-rotated': trendRotated, 'trend-overlay-fullbleed': !nativeFullscreenActive }" @click.self="closeTrendFullscreen">
-        <div class="trend-modal" :class="{ 'trend-modal-rotated': trendRotated, 'trend-modal-fullbleed': !nativeFullscreenActive }">
+      <div v-if="trendFullscreen && selectedChild" class="trend-overlay" :class="{ 'trend-overlay-rotated': trendRotated }" @click.self="closeTrendFullscreen">
+        <div class="trend-modal" :class="{ 'trend-modal-rotated': trendRotated }">
           <div class="trend-modal-head">
             <h3>📈 {{ selectedChild.name }} 的打卡趋势 · 近 {{ trendCheckins.length }} 次</h3>
             <div class="trend-modal-actions">
@@ -934,6 +943,38 @@ onBeforeUnmount(() => {
   padding: 6px 16px !important;
   font-size: 13px !important;
 }
+/* ── 审批列表分页 ── */
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 12px;
+}
+.page-btn {
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+  cursor: pointer;
+  transition: all .12s ease;
+}
+.page-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: #ecffd9;
+}
+.page-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+.page-info {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 700;
+}
 .pulse-tag {
   background: #ff9800 !important;
   color: #fff !important;
@@ -1152,27 +1193,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-/* WebView 拒绝原生全屏时的兑底：遮罩和弹层都真正铺满整屏，不留边距/透明背景 */
-.trend-overlay-fullbleed {
-  padding: 0;
-  background: #fff;
-  backdrop-filter: none;
-}
-.trend-modal-fullbleed {
-  max-width: none;
-  max-height: none;
-  height: 100dvh;
-  width: 100dvw;
-  border-radius: 0;
-  box-shadow: none;
-  overflow: hidden;
-}
-/* 满屏时图表撑满剩余高度，而不是固定 56vh */
-.trend-modal-fullbleed .trend-chart {
-  flex: 1;
-  height: auto;
-  min-height: 0;
 }
 .trend-modal-head {
   display: flex;
