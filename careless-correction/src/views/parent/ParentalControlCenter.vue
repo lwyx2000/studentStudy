@@ -260,9 +260,50 @@ function statusLabel(status: string) {
   return status === 'pending' ? '待审批' : status === 'approved' ? '已通过' : '已驳回'
 }
 
+// ── 苹果兑换申请审批（总控台直接处理，无需进苹果管理页）──
+interface AppleRedemptionRequestInfo {
+  id: number
+  childId: number
+  childName: string
+  count: number
+  reason: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: string | null
+}
+const redemptionRequests = ref<AppleRedemptionRequestInfo[]>([])
+const pendingRedemptions = computed(() => redemptionRequests.value.filter(r => r.status === 'pending'))
+
+async function loadRedemptionRequests() {
+  try {
+    const res = await api.points.getAppleRedemptionRequests()
+    redemptionRequests.value = res.requests ?? []
+  } catch { /* offline */ }
+}
+
+async function approveRedemption(r: AppleRedemptionRequestInfo) {
+  try {
+    await api.points.approveAppleRedemption(r.id)
+    await loadRedemptionRequests()
+    // 兑换申请不涉及阳光值，无需重拉打卡列表
+  } catch (e: any) {
+    alert(e?.message || '审批失败')
+  }
+}
+
+async function rejectRedemption(r: AppleRedemptionRequestInfo) {
+  if (!confirm(`确定驳回 ${r.childName} 的兑换申请（${r.count} 个苹果）？驳回后苹果会自动退回给孩子。`)) return
+  try {
+    await api.points.rejectAppleRedemption(r.id)
+    await loadRedemptionRequests()
+  } catch (e: any) {
+    alert(e?.message || '操作失败')
+  }
+}
+
 onMounted(() => {
   loadAllCheckins()
   loadData()
+  loadRedemptionRequests()
   document.addEventListener('fullscreenchange', onFullscreenChange)
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('resize', onResize)
@@ -495,6 +536,30 @@ onBeforeUnmount(() => {
       <div v-if="!filteredCheckins.length" class="empty-state">
         <span style="font-size:48px;display:block;margin-bottom:8px">📭</span>
         <p class="muted">暂无{{ filterStatus !== 'all' ? statusLabel(filterStatus) : '' }}打卡记录</p>
+      </div>
+    </section>
+
+    <!-- ═══ 苹果兑换申请审批（孩子提交，此处直接审批；提交时苹果已暂扣，驳回自动退回）═══ -->
+    <section v-if="pendingRedemptions.length" class="panel redemption-panel" style="border:2px solid #ff9800">
+      <div class="card-title">
+        <h2>🍎 孩子的苹果兑换申请</h2>
+        <span class="tag pulse-tag">{{ pendingRedemptions.length }} 条待审批</span>
+      </div>
+      <p class="muted" style="font-size:13px;margin-bottom:10px">
+        孩子在「阳光树」提交的苹果兑换申请；提交时苹果已暂时扣除（1 苹果 = 1 元），通过后确认扣除，驳回会自动退回。
+      </p>
+      <div class="list">
+        <div v-for="r in pendingRedemptions" :key="r.id" class="list-row redemption-row">
+          <div style="flex:1;min-width:0">
+            <strong>🍎 {{ r.childName }} 申请兑换 {{ r.count }} 个苹果（= {{ r.count }} 元）</strong>
+            <span class="muted" style="display:block;font-size:13px">用途：{{ r.reason }}</span>
+            <span v-if="r.createdAt" class="muted" style="display:block;font-size:12px">提交于 {{ formatTime(r.createdAt) }}</span>
+          </div>
+          <div style="display:flex;gap:8px;flex-shrink:0">
+            <button class="btn approve-btn" @click="approveRedemption(r)">✅ 通过</button>
+            <button class="btn reject-btn" @click="rejectRedemption(r)">❌ 驳回</button>
+          </div>
+        </div>
       </div>
     </section>
 

@@ -152,29 +152,6 @@ async function submitAppleAdjust() {
   }
 }
 
-// ── Apple redeem (家长代兑) ──
-const redeemCount = ref(1)
-const redeemReason = ref('')
-const redeemLoading = ref(false)
-const redeemSuccess = ref('')
-
-async function redeemAppleForChild() {
-  if (!childSelectStore.selectedChildId || redeemCount.value <= 0) return
-  redeemLoading.value = true
-  redeemSuccess.value = ''
-  try {
-    await api.points.redeemApple(redeemCount.value, redeemReason.value || `兑换 ${redeemCount.value} 元`, childSelectStore.selectedChildId)
-    redeemSuccess.value = `成功兑换 ${redeemCount.value} 个苹果（= ${redeemCount.value} 元）✅`
-    redeemReason.value = ''
-    redeemCount.value = 1
-    await loadChildData()
-    setTimeout(() => { redeemSuccess.value = '' }, 3000)
-  } catch (e: any) {
-    alert(e.message || '操作失败')
-  }
-  redeemLoading.value = false
-}
-
 // ── Apple redemption requests（孩子提交的兑换申请审批）──
 interface AppleRedemptionRequestInfo {
   id: number
@@ -289,9 +266,9 @@ function addItem() {
               <span class="muted" style="display:block;font-size:12px">苹果数</span>
             </div>
             <div style="text-align:center">
-              <div style="font-size:32px">💰</div>
+              <div style="font-size:32px">🍎</div>
               <strong style="font-size:24px">{{ childApples }}</strong>
-              <span class="muted" style="display:block;font-size:12px">可兑元</span>
+              <span class="muted" style="display:block;font-size:12px">可兑元（1苹果=1元）</span>
             </div>
           </div>
         </div>
@@ -424,62 +401,21 @@ function addItem() {
           </div>
         </section>
 
-        <section class="grid-2">
-          <div class="panel">
-            <div class="card-title">
-              <h2>🍎 苹果概况</h2>
-              <span class="tag">1 苹果 = 1 元</span>
-            </div>
-            <div class="apple-stats">
-              <div class="apple-stat">
-                <span style="font-size:36px">🍎</span>
-                <strong>{{ childApples }}</strong>
-                <span class="muted">个苹果</span>
-              </div>
-              <div class="apple-stat">
-                <span style="font-size:36px">💰</span>
-                <strong>{{ childApples }}</strong>
-                <span class="muted">可兑换元</span>
-              </div>
-            </div>
-            <p class="muted" style="font-size:14px;margin-top:12px">
-              孩子每积累 100 阳光值可以在「阳光树」页面种出 1 个苹果。苹果可以兑换成现金奖励（1 苹果 = 1 元）。
-            </p>
+        <section class="panel">
+          <div class="card-title">
+            <h2>🍎 苹果概况</h2>
+            <span class="tag">1 苹果 = 1 元</span>
           </div>
-
-          <div class="panel">
-            <div class="card-title">
-              <h2>💰 兑换苹果</h2>
-              <span class="tag">家长操作</span>
+          <div class="apple-stats">
+            <div class="apple-stat">
+              <span style="font-size:36px">🍎</span>
+              <strong>{{ childApples }}</strong>
+              <span class="muted">个苹果（= {{ childApples }} 元）</span>
             </div>
-            <div v-if="redeemSuccess" class="success-banner">{{ redeemSuccess }}</div>
-            <div v-if="childApples <= 0" class="muted" style="text-align:center;padding:20px">
-              暂无可兑换的苹果，孩子需要先在阳光树种出苹果。
-            </div>
-            <template v-else>
-              <div class="form-row">
-                <label>兑换数量</label>
-                <div class="count-stepper">
-                  <button class="step-btn" @click="redeemCount = Math.max(1, redeemCount - 1)">−</button>
-                  <input v-model.number="redeemCount" type="number" min="1" :max="childApples" class="input step-input" />
-                  <button class="step-btn" @click="redeemCount = Math.min(childApples, redeemCount + 1)">+</button>
-                </div>
-              </div>
-              <div class="form-row">
-                <label>兑换内容（可选）</label>
-                <input v-model="redeemReason" class="input" placeholder="例如：买一本漫画书" />
-              </div>
-              <div class="modal-summary">将使用 <strong>{{ redeemCount }}</strong> 个苹果（= <strong>{{ redeemCount }}</strong> 元）</div>
-              <button
-                class="btn"
-                style="width:100%"
-                :disabled="redeemCount <= 0 || redeemCount > childApples || redeemLoading"
-                @click="redeemAppleForChild"
-              >
-                {{ redeemLoading ? '处理中...' : `确认兑换 ${redeemCount} 个苹果` }}
-              </button>
-            </template>
           </div>
+          <p class="muted" style="font-size:14px;margin-top:12px">
+            孩子每积累 100 阳光值可以在「阳光树」页面种出 1 个苹果。苹果兑换无需预先配置：孩子在「阳光树」提交兑换申请（苹果暂扣），家长在上方或总控台审批即可，驳回会自动退回。
+          </p>
         </section>
 
         <!-- Apple manual adjust -->
@@ -542,7 +478,7 @@ function addItem() {
             <div v-for="record in childAppleHistory" :key="record.id" class="list-row">
               <div style="min-width:0">
                 <span :style="record.type === 'grow' || record.amount > 0 ? 'color:var(--primary)' : 'color:#c00'">
-                  {{ (record.type === 'grow' || record.amount > 0) ? '🍎 +' : '💰 -' }} {{ Math.abs(record.amount) }} 个
+                  {{ (record.type === 'grow' || record.amount > 0) ? '🍎 +' : '🍎 -' }} {{ Math.abs(record.amount) }} 个
                 </span>
                 <span class="muted" style="display:block;font-size:13px">{{ record.reason }}</span>
               </div>
