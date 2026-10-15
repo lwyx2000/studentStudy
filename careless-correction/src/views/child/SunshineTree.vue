@@ -1275,15 +1275,20 @@ watch(() => userStore.pendingSunlight, () => syncOrbs(), { deep: true })
 watch(() => userStore.apples, () => buildApples())
 
 // ── Lifecycle ──
+let pendingPollTimer: number | undefined
+
 onMounted(() => {
   // 进入页面时重新拉取最新阳光/苹果余额，避免显示陈旧数据
   // 不 await：场景先用缓存值立即渲染，数据返回后由下方 watcher 实时刷新
   userStore.fetchFromApi()
   loadRedemptionRequests()
   initScene()
+  // 定时轮询待收集阳光：家长审批打卡 / 手动发放后，树上的小太阳实时浮现
+  pendingPollTimer = window.setInterval(() => userStore.fetchPendingSunlight(), 30000)
 })
 
 onUnmounted(() => {
+  if (pendingPollTimer !== undefined) window.clearInterval(pendingPollTimer)
   cancelAnimationFrame(rafId)
   resizeObserver?.disconnect()
   resizeObserver = null
@@ -1419,7 +1424,7 @@ onUnmounted(() => {
       <div class="tips-grid">
         <div class="tip-item">
           <span class="tip-icon">☀️</span>
-          <p>家长审批打卡后，阳光树上会出现待收集的太阳</p>
+          <p>家长审批打卡或手动发放阳光后，阳光树上会出现待收集的太阳</p>
         </div>
         <div class="tip-item">
           <span class="tip-icon">✨</span>

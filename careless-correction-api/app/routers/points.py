@@ -81,24 +81,41 @@ def award_points(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """家长给孩子发放阳光值（只有家长角色可调用）"""
+    """家长给孩子发放阳光值（只有家长角色可调用）
+
+    发放（正数）不再直接增加阳光值，而是生成「待收集阳光」记录，
+    孩子需在阳光树页面点击收集后才正式变为阳光值（与打卡审批一致）；
+    扣除（负数）仍直接生效。
+    """
     if current_user.role != 'parent':
         raise HTTPException(status_code=403, detail='只有家长可以发放阳光值')
     if amount == 0:
         raise HTTPException(status_code=400, detail='数量不能为 0')
     target = resolve_target(current_user, child_id, db)
+    if amount > 0:
+        pending = PendingSunlight(
+            fk_users=target.pk_users,
+            amount=amount,
+            reason=reason,
+        )
+        db.add(pending)
+        db.commit()
+        return {
+            'balance': target.sunlight_points,
+            'awarded': amount,
+            'pending': True,
+            'newly_unlocked_badges': [],
+        }
     target.sunlight_points = max(0, target.sunlight_points + amount)
     history = SunlightHistory(
         fk_users=target.pk_users,
         amount=amount,
         reason=reason,
-        type='earn' if amount > 0 else 'spend',
+        type='spend',
     )
     db.add(history)
     db.commit()
-    # Check badge auto-unlock after points change
-    newly_unlocked = auto_unlock_badges(target, db)
-    return {'balance': target.sunlight_points, 'awarded': amount, 'newly_unlocked_badges': newly_unlocked}
+    return {'balance': target.sunlight_points, 'awarded': amount, 'pending': False, 'newly_unlocked_badges': []}
 
 
 @router.post('/redeem')

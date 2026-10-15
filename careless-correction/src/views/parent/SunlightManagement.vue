@@ -92,7 +92,9 @@ async function submitAward() {
   try {
     const reason = awardReason.value || (awardAmount.value > 0 ? '家长手动发放' : '家长手动扣除')
     await api.points.award(awardAmount.value, reason, childSelectStore.selectedChildId)
-    awardSuccess.value = `${awardAmount.value > 0 ? '发放' : '扣除'} ${Math.abs(awardAmount.value)} 阳光值成功 ✅`
+    awardSuccess.value = awardAmount.value > 0
+      ? `☀️ ${awardAmount.value} 阳光已放到阳光树上，孩子点击收集后才会正式入账`
+      : `扣除 ${Math.abs(awardAmount.value)} 阳光值成功 ✅`
     awardReason.value = ''
     await loadChildData()
     setTimeout(() => { awardSuccess.value = '' }, 3000)
@@ -253,7 +255,7 @@ function addItem() {
         <div class="hero-card">
           <span class="eyebrow">☀️ 阳光值管理</span>
           <h1>{{ selectedChild.name }} 的阳光值与苹果</h1>
-          <p class="lead">查看孩子的阳光值获取和消费记录，手动发放或扣除阳光值，管理苹果兑换。</p>
+          <p class="lead">查看孩子的阳光值获取和消费记录，手动发放或扣除阳光值，管理苹果兑换。发放的阳光会先出现在阳光树上，孩子点击收集后才正式变为阳光值。</p>
         </div>
         <div class="panel" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
           <span style="font-size:48px">☀️</span>
@@ -324,7 +326,7 @@ function addItem() {
             <span class="tag">家长专属</span>
           </div>
           <p class="muted" style="margin-bottom:16px;font-size:14px">
-            可以给孩子手动发放阳光值作为奖励（如主动完成额外任务），也可以扣除阳光值作为惩罚（如撒谎、打架）。正数为发放，负数为扣除。
+            可以给孩子手动发放阳光值作为奖励（如主动完成额外任务）：发放的阳光会先出现在阳光树上，孩子点击收集后才正式入账，更有获得感。也可以扣除阳光值作为惩罚（如撒谎、打架），扣除立即生效。正数为发放，负数为扣除。
           </p>
 
           <div class="award-form">
@@ -370,7 +372,7 @@ function addItem() {
               :disabled="!awardAmount || awardAmount === 0 || awardLoading"
               @click="submitAward"
             >
-              {{ awardLoading ? '处理中...' : (awardAmount > 0 ? `发放 ${awardAmount} 阳光值` : `扣除 ${Math.abs(awardAmount)} 阳光值`) }}
+              {{ awardLoading ? '处理中...' : (awardAmount > 0 ? `发放 ${awardAmount} 阳光到阳光树` : `扣除 ${Math.abs(awardAmount)} 阳光值`) }}
             </button>
           </div>
         </section>

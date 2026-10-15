@@ -477,7 +477,7 @@ export const api = {
       const params = new URLSearchParams({ amount: String(amount) })
       if (reason) params.set('reason', reason)
       if (childId) params.set('child_id', childId)
-      return request<{ balance: number; awarded: number }>(`/points/award?${params}`, { method: 'POST' })
+      return request<{ balance: number; awarded: number; pending?: boolean }>(`/points/award?${params}`, { method: 'POST' })
     },
     redeem: (rewardItemId: string, childId?: string | null) =>
       request<{ success: boolean; pointsSpent: number; itemName: string; balance: number }>(`/points/redeem?reward_item_id=${rewardItemId}${childId ? `&child_id=${childId}` : ''}`, { method: 'POST' }),
