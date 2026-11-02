@@ -23,6 +23,83 @@ from app.routers import (
 settings = Settings()
 
 
+def _normalize_checkin_dates(conn) -> int:
+    """把历史打卡日期统一成 YYYY-MM-DD。
+
+    早期版本允许 `2026/8/1` 这类写法，导致同一天分裂成多条记录、连续天数算错，
+    也让按日期的等值查询失效（只能把整表读进内存逐条解析）。这里一次性归一。
+    """
+    rows = conn.execute(text('SELECT pk_check_ins, check_date FROM t_check_ins')).fetchall()
+    fixed = 0
+    for pk, raw in rows:
+        if not raw:
+            continue
+        s = str(raw).strip().replace('/', '-').replace('.', '-')
+        parts = s.split('-')
+        if len(parts) != 3:
+            continue
+        try:
+            iso = f'{int(parts[0]):04d}-{int(parts[1]):02d}-{int(parts[2]):02d}'
+        except ValueError:
+            continue
+        if iso != raw:
+            conn.execute(
+                text('UPDATE t_check_ins SET check_date = :iso WHERE pk_check_ins = :pk'),
+                {'iso': iso, 'pk': pk},
+            )
+            fixed += 1
+    return fixed
+
+
+# 高频查询路径的索引：不建索引时每个接口都要全表扫描，数据量涨起来后
+# 打卡页（每次提交要读 3~4 次打卡表）会明显变慢。
+_INDEXES = (
+    ('ix_check_ins_user_date', 'CREATE INDEX IF NOT EXISTS ix_check_ins_user_date ON t_check_ins(fk_users, check_date)'),
+    ('ix_check_ins_user_status', 'CREATE INDEX IF NOT EXISTS ix_check_ins_user_status ON t_check_ins(fk_users, status)'),
+    ('ix_tasks_user_active', 'CREATE INDEX IF NOT EXISTS ix_tasks_user_active ON t_tasks(fk_users, active)'),
+    ('ix_tasks_user_assigned', 'CREATE INDEX IF NOT EXISTS ix_tasks_user_assigned ON t_tasks(fk_users, assigned_date)'),
+    ('ix_sub_tasks_task', 'CREATE INDEX IF NOT EXISTS ix_sub_tasks_task ON t_sub_tasks(fk_tasks)'),
+    ('ix_habit_sops_user', 'CREATE INDEX IF NOT EXISTS ix_habit_sops_user ON t_habit_sops(fk_users, active)'),
+    ('ix_sop_steps_habit', 'CREATE INDEX IF NOT EXISTS ix_sop_steps_habit ON t_sop_steps(fk_habit_sops)'),
+    ('ix_sunlight_user_time', 'CREATE INDEX IF NOT EXISTS ix_sunlight_user_time ON t_sunlight_history(fk_users, created_at)'),
+    ('ix_apple_user_time', 'CREATE INDEX IF NOT EXISTS ix_apple_user_time ON t_apple_history(fk_users, created_at)'),
+    ('ix_apple_req_user_status', 'CREATE INDEX IF NOT EXISTS ix_apple_req_user_status ON t_apple_redemption_requests(fk_users, status)'),
+    ('ix_pending_user_collected', 'CREATE INDEX IF NOT EXISTS ix_pending_user_collected ON t_pending_sunlight(fk_users, collected)'),
+    ('ix_mistakes_user_due', 'CREATE INDEX IF NOT EXISTS ix_mistakes_user_due ON t_mistake_records(fk_users, next_review_at)'),
+    ('ix_mistake_reviews_record', 'CREATE INDEX IF NOT EXISTS ix_mistake_reviews_record ON t_mistake_reviews(fk_mistake_records)'),
+    ('ix_badge_unlocks_user', 'CREATE INDEX IF NOT EXISTS ix_badge_unlocks_user ON t_badge_unlocks(fk_users)'),
+    ('ix_growth_user_date', 'CREATE INDEX IF NOT EXISTS ix_growth_user_date ON t_growth_snapshots(fk_users, snapshot_date)'),
+    ('ix_alerts_user_time', 'CREATE INDEX IF NOT EXISTS ix_alerts_user_time ON t_diagnostic_alerts(fk_users, created_at)'),
+    ('ix_item_loss_user', 'CREATE INDEX IF NOT EXISTS ix_item_loss_user ON t_item_loss_records(fk_users)'),
+    ('ix_item_storage_user', 'CREATE INDEX IF NOT EXISTS ix_item_storage_user ON t_item_storage_records(fk_users)'),
+    ('ix_reward_items_user', 'CREATE INDEX IF NOT EXISTS ix_reward_items_user ON t_reward_items(fk_users)'),
+    ('ix_weekly_progress_user', 'CREATE INDEX IF NOT EXISTS ix_weekly_progress_user ON t_task_weekly_progress(fk_users)'),
+)
+
+
+def _create_indexes():
+    """在 create_all 之后执行：新库也要有索引。
+
+    单个索引失败（例如老库缺列）只打印告警，不影响启动——绝不能因为建索引
+    失败导致整个服务起不来。
+    """
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    created = 0
+    with engine.connect() as conn:
+        for _name, ddl in _INDEXES:
+            table = ddl.split(' ON ')[1].split('(')[0].strip()
+            if table not in tables:
+                continue
+            try:
+                conn.execute(text(ddl))
+                created += 1
+            except Exception as exc:  # noqa: BLE001 - 任何失败都不应阻断启动
+                print(f'[migrate] 创建索引失败（{table}）：{exc}')
+        conn.commit()
+    return created
+
+
 def _run_migrations():
     """Run schema migrations for existing databases."""
     with engine.connect() as conn:
@@ -79,6 +156,10 @@ def _run_migrations():
                 'CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_sunlight_checkin '
                 'ON t_pending_sunlight(fk_check_ins)'
             ))
+        if 't_check_ins' in tables:
+            fixed = _normalize_checkin_dates(conn)
+            if fixed:
+                print(f'[migrate] 归一化打卡日期 {fixed} 条')
         conn.commit()
 
 
@@ -86,6 +167,7 @@ def _run_migrations():
 async def lifespan(app: FastAPI):
     _run_migrations()
     Base.metadata.create_all(bind=engine)
+    _create_indexes()
     # 初始化基础数据（勋章定义、循证文章），仅在表为空时插入
     from app.services.seed import seed_initial_data
     with SessionLocal() as db:

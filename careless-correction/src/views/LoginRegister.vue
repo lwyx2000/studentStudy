@@ -14,6 +14,8 @@ const mode = ref<'login' | 'register'>('login')
 const name = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+// 已有家长账号后，后端要求注册携带邀请码（REGISTER_INVITE_CODE）
+const inviteCode = ref('')
 const error = ref('')
 const loading = ref(false)
 // 记住账号（只存用户名，不存密码）
@@ -53,7 +55,11 @@ async function submit() {
   loading.value = true
   try {
     const res = mode.value === 'register'
-      ? await api.auth.register({ name: name.value.trim(), password: password.value })
+      ? await api.auth.register({
+          name: name.value.trim(),
+          password: password.value,
+          inviteCode: inviteCode.value.trim() || undefined,
+        })
       : await api.auth.login({ name: name.value.trim(), password: password.value })
 
     setAuthToken(res.token)
@@ -189,6 +195,14 @@ const particlesOptions: ISourceOptions = {
               <div class="input-row">
                 <span class="icon">🔒</span>
                 <input v-model="confirmPassword" class="inp" type="password" placeholder="再次输入密码" @keyup.enter="submit" />
+              </div>
+            </label>
+
+            <label v-if="mode === 'register'" class="field">
+              <span>邀请码（可选）</span>
+              <div class="input-row">
+                <span class="icon">🎟️</span>
+                <input v-model="inviteCode" class="inp" placeholder="首个家长账号可留空" @keyup.enter="submit" />
               </div>
             </label>
 

@@ -109,6 +109,9 @@ def add_child(
     ).first()
     if existing:
         raise HTTPException(status_code=409, detail='已存在同名孩子')
+    name = (name or '').strip()
+    if not 1 <= len(name) <= 30:
+        raise HTTPException(status_code=400, detail='孩子姓名长度需为 1-30 个字符')
     initial_password = _generate_child_password()
     child = User(
         name=name,
@@ -143,8 +146,13 @@ def update_child(
     if not child:
         raise HTTPException(status_code=404, detail='孩子账号不存在')
     if name is not None:
+        name = name.strip()
+        if not 1 <= len(name) <= 30:
+            raise HTTPException(status_code=400, detail='孩子姓名长度需为 1-30 个字符')
         child.name = name
     if grade is not None:
+        if not 0 <= grade <= 12:
+            raise HTTPException(status_code=400, detail='年级取值无效')
         child.grade = grade
     db.commit()
     db.refresh(child)

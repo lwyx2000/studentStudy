@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { api } from '../../utils/api'
 import { useParentStore } from '../../stores'
 
 const parentStore = useParentStore()
@@ -8,8 +9,22 @@ const form = ref({ ...parentStore.llmConfig })
 const saved = ref(false)
 const testResult = ref('')
 
+// 后端读取配置时用 `***` 代替真实 Key；这个占位符绝不能回传，
+// 否则真实 Key 会被 `***` 覆盖，AI 分析直接失效
+const KEY_PLACEHOLDER = '***'
+const savedKeyExists = ref(!!parentStore.llmConfig.apiKey)
+
 function save() {
-  parentStore.updateLlmConfig(form.value)
+  const apiKey = form.value.apiKey === KEY_PLACEHOLDER ? undefined : form.value.apiKey
+  parentStore.updateLlmConfig({
+    endpoint: form.value.endpoint,
+    model: form.value.model,
+    mistakePrompt: form.value.mistakePrompt,
+    assessmentPrompt: form.value.assessmentPrompt,
+    assessmentCron: form.value.assessmentCron,
+    enabled: form.value.enabled,
+    ...(apiKey !== undefined ? { apiKey } : {}),
+  })
   saved.value = true
   setTimeout(() => { saved.value = false }, 2000)
 }
@@ -17,22 +32,12 @@ function save() {
 async function testConnection() {
   testResult.value = '测试中...'
   try {
-    const res = await fetch(`${form.value.endpoint}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${form.value.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: form.value.model,
-        messages: [{ role: 'user', content: '回复"连接成功"' }],
-        max_tokens: 10,
-      }),
-    })
-    if (res.ok) testResult.value = '✅ 连接成功'
-    else testResult.value = `❌ ${res.status} ${res.statusText}`
-  } catch {
-    testResult.value = '❌ 连接失败，请检查地址和 Key'
+    // 走后端测试：浏览器直连大模型服务会被 CORS 拦（多数厂商不允许跨域），
+    // 而且占位符状态下前端也拿不到真实 Key
+    const res = await api.llm.test()
+    testResult.value = res.success ? '✅ 连接成功' : `❌ ${res.result || '连接失败'}`
+  } catch (e: any) {
+    testResult.value = `❌ ${e?.message || '连接失败，请检查地址和 Key'}`
   }
 }
 </script>
@@ -77,7 +82,17 @@ async function testConnection() {
       <input v-model="form.endpoint" class="input" style="margin-bottom:12px" placeholder="https://api.openai.com/v1" />
 
       <label style="font-weight:800;display:block;margin-bottom:4px">API Key</label>
-      <input v-model="form.apiKey" class="input" type="password" style="margin-bottom:12px" placeholder="sk-..." />
+      <input
+        v-model="form.apiKey"
+        class="input"
+        type="password"
+        style="margin-bottom:4px"
+        :placeholder="savedKeyExists ? '已保存，保持 *** 表示不修改' : 'sk-...'"
+      />
+      <p v-if="savedKeyExists" class="muted" style="margin-bottom:12px;font-size:13px">
+        已保存过 Key（用 *** 代替显示）。不修改时保持 *** 即可，填入新值才会覆盖。
+      </p>
+      <div v-else style="margin-bottom:8px"></div>
 
       <label style="font-weight:800;display:block;margin-bottom:4px">模型</label>
       <select v-model="form.model" class="input" style="margin-bottom:16px">

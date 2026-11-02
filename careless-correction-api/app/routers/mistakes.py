@@ -155,10 +155,12 @@ def get_due_reviews(
     return {'records': records}
 
 
-# 艾宾浩斯复习间隔（天数）：第1次3天，第2次7天，第3次14天，第4次30天
+# 艾宾浩斯复习间隔（天数）：第1次复习后 3 天，第2次 7 天，第3次 14 天，第4次及以后 30 天
 def _get_next_review_interval(review_count: int) -> int:
     intervals = [3, 7, 14, 30]
-    idx = min(review_count, len(intervals) - 1)
+    # review_count 是「本次是第几次复习」（从 1 开始），所以要减 1 取下标；
+    # 旧实现直接用 review_count 当索引，第一次复习就排到了 7 天后。
+    idx = min(max(review_count - 1, 0), len(intervals) - 1)
     return intervals[idx]
 
 

@@ -24,8 +24,12 @@ def _matches_week_day(week_day: str | None, d: date) -> bool:
     """主任务按 week_day 过滤（weekday/weekend/逗号分隔的星期名），空值表示每天。"""
     if not week_day:
         return True
-    is_weekday = 0 < d.weekday() + 1 < 7  # Monday=1..Friday=5
-    is_weekend = d.weekday() >= 5  # Saturday/Sunday
+    # weekday() 返回值：周一=0 … 周五=4、周六=5、周日=6
+    # 旧实现写成 `0 < weekday()+1 < 7`，把周六(5+1=6)也算成了工作日，
+    # 与前端 matchesToday（today>=1 && today<=5）口径不一致：
+    # 周六会把「仅工作日」的小任务也计入必做总数，导致「全部完成奖励」永远拿不到。
+    is_weekday = d.weekday() < 5
+    is_weekend = d.weekday() >= 5
     if week_day == 'weekday':
         return is_weekday
     if week_day == 'weekend':
@@ -368,6 +372,9 @@ def add_subtask(
         owner = db.query(User).filter(User.pk_users == task.fk_users).first()
         if not owner or owner.fk_users_parent != current_user.pk_users:
             raise HTTPException(status_code=403, detail='无权操作')
+    if reward_points is not None and not 0 <= reward_points <= 999:
+        # 子任务分值是打卡计分的直接来源，不能落在合法区间外
+        raise HTTPException(status_code=400, detail='小任务分值需在 0-999 之间')
     subtask = SubTask(
         fk_tasks=task_id,
         title=title,
@@ -419,6 +426,8 @@ def update_subtask(
     if is_optional is not None:
         subtask.is_optional = is_optional
     if reward_points is not None:
+        if not 0 <= reward_points <= 999:
+            raise HTTPException(status_code=400, detail='小任务分值需在 0-999 之间')
         subtask.reward_points = reward_points
     db.commit()
     db.refresh(subtask)

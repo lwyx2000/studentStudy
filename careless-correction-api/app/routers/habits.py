@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth import get_current_user, require_parent
 from app.database import get_db
-from app.models import HabitSOP, SOPStep, User
+from app.models import HabitSOP, SOPStep, Task, TaskWeeklyProgress, User
 
 router = APIRouter()
 
@@ -180,6 +180,8 @@ def create_habit(
     db: Session = Depends(get_db),
 ):
     target = resolve_target(current_user, child_id, db)
+    if not 0 <= data.reward_points <= 999:
+        raise HTTPException(status_code=400, detail='习惯分值需在 0-999 之间')
     habit = HabitSOP(
         fk_users=target.pk_users,
         title=data.title,
@@ -245,6 +247,14 @@ def delete_habit_permanent(
     if not habit:
         raise HTTPException(status_code=404, detail='习惯不存在')
     _check_habit_permission(habit, current_user, db)
+    # Task.fk_habit_sops 指向本习惯且不是级联删除：开着 foreign_keys=ON 时
+    # 直接删习惯会抛 IntegrityError（500）。先解绑，让任务保留但不再关联 SOP。
+    db.query(Task).filter(Task.fk_habit_sops == habit_id).update(
+        {Task.fk_habit_sops: None}, synchronize_session=False
+    )
+    db.query(TaskWeeklyProgress).filter(TaskWeeklyProgress.fk_habit_sops == habit_id).update(
+        {TaskWeeklyProgress.fk_habit_sops: None}, synchronize_session=False
+    )
     db.query(SOPStep).filter(SOPStep.fk_habit_sops == habit_id).delete()
     db.delete(habit)
     db.commit()

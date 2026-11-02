@@ -450,6 +450,9 @@ async function submitChecklist() {
           title: item.title,
           icon: item.icon,
           points: itemPoints(item),
+          // 带上子任务 id：不同主任务下可能有同名小任务且分值不同，
+          // 只靠标题后端无法区分，会把两条都按第一条的分值计算
+          subTaskId: item.id,
         })),
       })
       // ★ 提交成功后再更新本地持久化状态，避免 API 失败时状态不一致

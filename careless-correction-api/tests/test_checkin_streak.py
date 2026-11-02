@@ -82,7 +82,7 @@ def test_submit_returns_streak_and_approve_generates_pending(client):
     payload = resp.json()
     assert payload['streak']['days'] == 1
     assert payload['streak']['isNewToday'] is True
-    checkin_id = payload['checkin']['pk_check_ins']
+    checkin_id = payload['checkin']['id']
 
     approved = client.post(f'/api/v1/checkins/{checkin_id}/approve', headers=client.parent_headers)
     assert approved.status_code == 200
@@ -105,7 +105,7 @@ def test_backfill_old_date_does_not_reset_streak(client):
     today = date.today()
     yesterday = today - timedelta(days=1)
     resp = _submit(client, yesterday, 8)
-    checkin_id = resp.json()['checkin']['pk_check_ins']
+    checkin_id = resp.json()['checkin']['id']
     client.post(f'/api/v1/checkins/{checkin_id}/approve', headers=client.parent_headers)
 
     with SASession(engine) as s:
@@ -114,7 +114,7 @@ def test_backfill_old_date_does_not_reset_streak(client):
 
     # 补一条很久以前的打卡（中间断档），审批后连击不应被改成 1
     old = today - timedelta(days=20)
-    old_id = _submit(client, old, 5).json()['checkin']['pk_check_ins']
+    old_id = _submit(client, old, 5).json()['checkin']['id']
     client.post(f'/api/v1/checkins/{old_id}/approve', headers=client.parent_headers)
     with SASession(engine) as s:
         child = s.query(User).filter(User.pk_users == client.child_id).first()

@@ -293,8 +293,9 @@ export function normalizeArticle(a: any): ArticleResource {
 
 export const api = {
   auth: {
-    register: (data: { name: string; password: string }) =>
-      request<any>(`/auth/register?name=${encodeURIComponent(data.name)}&password=${encodeURIComponent(data.password)}`, { method: 'POST' }),
+    // 已存在家长账号后，注册需要邀请码（后端 REGISTER_INVITE_CODE）
+    register: (data: { name: string; password: string; inviteCode?: string }) =>
+      request<any>(`/auth/register?name=${encodeURIComponent(data.name)}&password=${encodeURIComponent(data.password)}${data.inviteCode ? `&invite_code=${encodeURIComponent(data.inviteCode)}` : ''}`, { method: 'POST' }),
     login: (data: { name: string; password: string }) =>
       request<any>(`/auth/login?name=${encodeURIComponent(data.name)}&password=${encodeURIComponent(data.password)}`, { method: 'POST' }),
     session: () =>
@@ -408,7 +409,8 @@ export const api = {
   habits: {
     getAll: (childId?: string) =>
       request<any>(`/habits/${childId ? `?child_id=${childId}` : ''}`),
-    update: (data: { id: string; title?: string; gradeRange?: string; difficultyLevel?: number; rewardPoints?: number; steps?: Array<{ instruction: string; order: number }> }) =>
+    // 注意：后端更新步骤是「全量替换」，传 steps 时必须带上 imageUrl/gifUrl，否则图片会被清空
+    update: (data: { id: string; title?: string; gradeRange?: string; difficultyLevel?: number; rewardPoints?: number; active?: boolean; steps?: Array<{ instruction: string; order: number; imageUrl?: string; gifUrl?: string }> }) =>
       request<any>(`/habits/${data.id}`, { method: 'PUT', body: JSON.stringify(data) }),
     create: (data: { title: string; gradeRange?: string; difficultyLevel?: number; rewardPoints?: number; steps?: Array<{ instruction: string; order: number }>; childId?: string }) => {
       const path = data.childId ? `/habits/?child_id=${data.childId}` : '/habits/'
@@ -538,17 +540,10 @@ export const api = {
       optionalBonus?: number
       allDoneBonus?: number
       habitPoints?: number
-      completedTasks?: { title: string; icon?: string; points?: number }[]
+      completedTasks?: { title: string; icon?: string; points?: number; subTaskId?: string }[]
     }) => {
-      const params = new URLSearchParams({ check_date: data.checkDate })
-      if (data.totalPoints) params.set('total_points', String(data.totalPoints))
-      if (data.habitStepCount) params.set('habit_step_count', String(data.habitStepCount))
-      if (data.taskCount) params.set('task_count', String(data.taskCount))
-      if (data.requiredPoints) params.set('required_points', String(data.requiredPoints))
-      if (data.optionalBonus) params.set('optional_bonus', String(data.optionalBonus))
-      if (data.allDoneBonus) params.set('all_done_bonus', String(data.allDoneBonus))
-      if (data.habitPoints) params.set('habit_points', String(data.habitPoints))
-      if (data.completedTasks?.length) params.set('completed_tasks', JSON.stringify(data.completedTasks))
+      // 走 JSON body：小任务标题是中文，放进 query string 会被 percent-encode 成 3 倍长度，
+      // 清单多几项就超过 nginx 8KB 的请求行上限（414），打卡直接失败
       return request<{
         checkin: any
         updated: boolean
@@ -560,7 +555,20 @@ export const api = {
           isNewToday: boolean
           todayDate: string
         }
-      }>(`/checkins/?${params}`, { method: 'POST' })
+      }>('/checkins/submit', {
+        method: 'POST',
+        body: JSON.stringify({
+          check_date: data.checkDate,
+          total_points: data.totalPoints ?? 0,
+          habit_step_count: data.habitStepCount ?? 0,
+          task_count: data.taskCount ?? 0,
+          required_points: data.requiredPoints ?? 0,
+          optional_bonus: data.optionalBonus ?? 0,
+          all_done_bonus: data.allDoneBonus ?? 0,
+          habit_points: data.habitPoints ?? 0,
+          completed_tasks: data.completedTasks ?? [],
+        }),
+      })
     },
     getStats: (childId?: string, days = 92) => {
       const params = new URLSearchParams({ days: String(days) })

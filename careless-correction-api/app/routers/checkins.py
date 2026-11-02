@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, selectinload
 
@@ -90,60 +91,80 @@ def _calc_best_streak(dates: set[date]) -> int:
 
 
 def _has_checked_today(child_id: int, db: Session) -> bool:
-    """今天是否已经提交过打卡（待审批也算，已驳回不算）。"""
+    """今天是否已经提交过打卡（待审批也算，已驳回不算）。
+
+    启动迁移会把历史 check_date 全部归一成 YYYY-MM-DD，因此这里可以直接用
+    等值查询（走 ix_check_ins_user_date 索引），不必把整张表读进内存再逐个解析。
+    """
     today = datetime.now().date()
-    rows = (
-        db.query(CheckIn.check_date)
+    row = (
+        db.query(CheckIn.pk_check_ins)
         .filter(
             CheckIn.fk_users == child_id,
             CheckIn.status.in_(['pending', 'approved']),
+            CheckIn.check_date == today.isoformat(),
         )
-        .all()
+        .first()
     )
-    return any(_parse_check_date(raw) == today for (raw,) in rows)
+    return row is not None
 
 
 def _streak_snapshot(child: User, db: Session, include_today_pending: bool = True):
-    """返回 (当前连续天数, 历史最佳连续天数, 含今日待审批的展示天数)。
+    """返回 (当前连续天数, 历史最佳连续天数, 含今日待审批的展示天数, 今日是否已提交)。
 
     streak_days 以「今天/昨天」为锚点动态计算，因此补打卡历史日期不会把已有连击覆盖掉。
+    今日是否已提交一并返回，避免调用方再查一次库。
     """
     approved = _approved_dates(child.pk_users, db)
     today = datetime.now().date()
     base = _calc_streak(approved, today)
+    checked_today = _has_checked_today(child.pk_users, db)
     display = base
-    if include_today_pending and today not in approved and _has_checked_today(child.pk_users, db):
+    if include_today_pending and today not in approved and checked_today:
         display = base + 1
     best = max(_calc_best_streak(approved), display)
-    return base, best, display
+    return base, best, display, checked_today
 
 
 def _refresh_streak_days(child: User, db: Session) -> int:
     """刷新并回写连续打卡天数（仅统计已通过审批的记录）。"""
-    base, _best, _display = _streak_snapshot(child, db, include_today_pending=False)
+    base, _best, _display, _checked = _streak_snapshot(child, db, include_today_pending=False)
     child.streak_days = base
     return base
 
 
-def _sanitize_completed_tasks_snapshot(raw: str | None) -> list[dict]:
-    """清洗前端传来的完成项快照 JSON：只保留 title/icon/points，限制数量与长度。"""
+def _sanitize_completed_tasks_snapshot(raw) -> list[dict]:
+    """清洗前端传来的完成项快照：只保留 title/icon/points/subTaskId，限制数量与长度。
+
+    raw 可以是 JSON 字符串（旧客户端的 query 参数）或已经解析好的列表（新客户端 JSON body）。
+    """
     if not raw:
         return []
     try:
-        data = json.loads(raw)
+        data = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
         if not isinstance(data, list):
             return []
-        cleaned = []
+        cleaned: list[dict] = []
+        seen: set[str] = set()
         for item in data[:100]:
             if not isinstance(item, dict):
                 continue
-            title = str(item.get('title', ''))[:100]
+            title = str(item.get('title', ''))[:100].strip()
             if not title:
                 continue
+            # 子任务 id 用于精确计分：同名小任务分属不同主任务时不会互相顶掉
+            sid = str(item.get('subTaskId') or item.get('sub_task_id') or '').strip()[:20]
+            key = f'id:{sid}' if sid else f'title:{title}'
+            if key in seen:
+                # 同一条小任务重复提交（客户端连点或伪造请求）只计一次，
+                # 否则把同一项复制 N 遍就能拿到 N 倍阳光值
+                continue
+            seen.add(key)
             cleaned.append({
                 'title': title,
                 'icon': str(item.get('icon', ''))[:10],
                 'points': max(0, min(9999, int(item.get('points', 0) or 0))),
+                'subTaskId': sid,
             })
         return cleaned
     except Exception:
@@ -199,6 +220,72 @@ def submit_checkin(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    """提交打卡（query 参数版，保留给已安装的旧客户端）。"""
+    return _submit_checkin(
+        db=db,
+        current_user=current_user,
+        check_date=check_date,
+        total_points=total_points,
+        habit_step_count=habit_step_count,
+        task_count=task_count,
+        required_points=required_points,
+        optional_bonus=optional_bonus,
+        all_done_bonus=all_done_bonus,
+        habit_points=habit_points,
+        completed_tasks=completed_tasks,
+    )
+
+
+class CheckinSubmitIn(BaseModel):
+    check_date: str
+    total_points: int = 0
+    habit_step_count: int = 0
+    task_count: int = 0
+    required_points: int = 0
+    optional_bonus: int = 0
+    all_done_bonus: int = 0
+    habit_points: int = 0
+    # 直接收数组：走 query string 时中文标题 percent-encode 后会膨胀数倍，
+    # 清单多几项就可能撞上 nginx 的 8KB 请求行上限（414），打卡直接失败
+    completed_tasks: list[dict] | None = None
+
+
+@router.post('/submit')
+def submit_checkin_json(
+    payload: CheckinSubmitIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """提交打卡（JSON body 版，前端使用）。"""
+    return _submit_checkin(
+        db=db,
+        current_user=current_user,
+        check_date=payload.check_date,
+        total_points=payload.total_points,
+        habit_step_count=payload.habit_step_count,
+        task_count=payload.task_count,
+        required_points=payload.required_points,
+        optional_bonus=payload.optional_bonus,
+        all_done_bonus=payload.all_done_bonus,
+        habit_points=payload.habit_points,
+        completed_tasks=payload.completed_tasks,
+    )
+
+
+def _submit_checkin(
+    *,
+    db: Session,
+    current_user: User,
+    check_date: str,
+    total_points: int = 0,
+    habit_step_count: int = 0,
+    task_count: int = 0,
+    required_points: int = 0,
+    optional_bonus: int = 0,
+    all_done_bonus: int = 0,
+    habit_points: int = 0,
+    completed_tasks=None,
+) -> dict:
     normalized = _normalize_check_date(check_date)
     if not normalized:
         raise HTTPException(status_code=400, detail='打卡日期格式无效')
@@ -221,7 +308,8 @@ def submit_checkin(
     )
     # 当天「必做小任务」总数，用于服务端判定全部完成奖励
     today_required = 0
-    subtask_index: dict[str, tuple[int, bool]] = {}
+    subtask_by_id: dict[str, tuple[int, bool]] = {}
+    subtask_by_title: dict[str, tuple[int, bool]] = {}
     for t in tasks:
         if not _matches_week_day(t.week_day, check_date_obj):
             continue
@@ -231,10 +319,11 @@ def submit_checkin(
             pts = s.reward_points if s.reward_points is not None else (
                 OPTIONAL_BONUS_POINTS if s.is_optional else (t.reward_points or 0)
             )
-            # 同名子任务以先出现的为准（与前端列表顺序一致）
-            subtask_index.setdefault(
-                s.title.strip(), (max(0, min(int(pts), 999)), bool(s.is_optional))
-            )
+            entry = (max(0, min(int(pts), 999)), bool(s.is_optional))
+            # 精确索引：不同主任务下同名的小任务分值可能不同，按 id 才能算对
+            subtask_by_id[str(s.pk_sub_tasks)] = entry
+            # 兜底索引：旧客户端只传标题，同名以先出现的为准（与前端列表顺序一致）
+            subtask_by_title.setdefault(s.title.strip(), entry)
             if not s.is_optional:
                 today_required += 1
 
@@ -247,6 +336,9 @@ def submit_checkin(
     )
     habit_sum = sum((h.reward_points or 0) * len(h.steps) for h in habits)
     habit_points = min(habit_points, habit_sum)
+    # 习惯步数同样以数据库为准，避免客户端塞一个夸张数字污染家长端的「完成习惯步骤」
+    max_steps = sum(len(h.steps) for h in habits)
+    habit_step_count = max(0, min(habit_step_count, max_steps))
 
     snapshot_items = _sanitize_completed_tasks_snapshot(completed_tasks)
 
@@ -255,12 +347,22 @@ def submit_checkin(
         optional_count = 0
         matched_required = 0
         fixed_items: list[dict] = []
+        # 已计入的小任务（按 id / 标题归一）：同一条小任务无论出现几次都只计一次分
+        counted: set[str] = set()
         for item in snapshot_items:
-            hit = subtask_index.get(str(item.get('title', '')).strip())
+            title = str(item.get('title', '')).strip()
+            sid = str(item.get('subTaskId') or '').strip()
+            hit = subtask_by_id.get(sid) if sid else None
             if hit is None:
-                # 数据库里找不到对应小任务（已被删除或客户端伪造）→ 不计分
+                hit = subtask_by_title.get(title)
+                counter_key = f'title:{title}'
+            else:
+                counter_key = f'id:{sid}'
+            if hit is None or counter_key in counted:
+                # 数据库里找不到对应小任务（已被删除或客户端伪造），或重复提交 → 不计分
                 fixed_items.append({**item, 'points': 0, 'verified': False})
                 continue
+            counted.add(counter_key)
             pts, is_optional = hit
             if is_optional:
                 optional_count += 1
@@ -280,7 +382,13 @@ def submit_checkin(
     else:
         # 无快照（旧客户端）：沿用理论上限夹取
         task_sum = sum(t.reward_points or 0 for t in tasks)
-        subtask_sum = sum((s.reward_points or 0) for t in tasks for s in t.sub_tasks)
+        subtask_sum = sum(
+            (
+                s.reward_points if s.reward_points is not None
+                else (OPTIONAL_BONUS_POINTS if s.is_optional else (t.reward_points or 0))
+            )
+            for t in tasks for s in t.sub_tasks
+        )
         max_possible = max(task_sum, subtask_sum) + habit_sum + 110
         total_points = min(total_points, max_possible)
         required_points = max(0, min(required_points, total_points))
@@ -327,15 +435,17 @@ def submit_checkin(
         existing.approved_at = None
         db.commit()
         db.refresh(existing)
-        base, best, display = _streak_snapshot(current_user, db)
+        base, best, display, checked_today = _streak_snapshot(current_user, db)
         return {
-            'checkin': existing,
+            # 统一用 camelCase 序列化（与 /mine、/details 一致），否则同一个对象
+            # 在不同接口下字段名不一样，前端只能靠猜
+            'checkin': _checkin_to_dict(existing, current_user),
             'updated': True,
             'streak': {
                 'days': display,
                 'approvedDays': base,
                 'bestDays': best,
-                'checkedToday': _has_checked_today(current_user.pk_users, db),
+                'checkedToday': checked_today,
                 'isNewToday': False,
                 'todayDate': normalized,
             },
@@ -357,15 +467,15 @@ def submit_checkin(
     db.add(record)
     db.commit()
     db.refresh(record)
-    base, best, display = _streak_snapshot(current_user, db)
+    base, best, display, checked_today = _streak_snapshot(current_user, db)
     return {
-        'checkin': record,
+        'checkin': _checkin_to_dict(record, current_user),
         'updated': False,
         'streak': {
             'days': display,
             'approvedDays': base,
             'bestDays': best,
-            'checkedToday': _has_checked_today(current_user.pk_users, db),
+            'checkedToday': checked_today,
             'isNewToday': _parse_check_date(normalized) == datetime.now().date(),
             'todayDate': normalized,
         },
@@ -420,7 +530,7 @@ def get_checkin_stats(
             by_date[d] = r
 
     approved_dates = {d for d, r in by_date.items() if r.status == 'approved'}
-    base_streak, best_streak, display_streak = _streak_snapshot(target, db)
+    base_streak, best_streak, display_streak, _checked = _streak_snapshot(target, db)
 
     start = today - timedelta(days=days - 1)
     daily = []
@@ -468,8 +578,10 @@ def get_checkin_stats(
         r.total_points or 0 for d, r in by_date.items()
         if r.status == 'approved' and d.strftime('%Y-%m') == month_prefix
     )
-    collected_sunlight = sum(p.amount for p in pending_by_checkin.values() if p.collected)
-    uncollected_sunlight = sum(p.amount for p in pending_by_checkin.values() if not p.collected)
+    collected_sunlight = sum(p.amount for p in pending_rows if p.collected)
+    # 未收集的要算上所有来源：家长手动发放的阳光不关联打卡（fk_check_ins 为空），
+    # 只统计 pending_by_checkin 会让「待收集」总额比阳光树页面实际显示的少
+    uncollected_sunlight = sum(p.amount for p in pending_rows if not p.collected)
 
     return {
         'today': today.isoformat(),
@@ -619,7 +731,7 @@ def approve_checkin(
     db.refresh(child)
     # Auto-unlock badges after checkin approval
     newly_unlocked = auto_unlock_badges(child, db)
-    _base, _best, display_days = _streak_snapshot(child, db)
+    _base, _best, display_days, _checked = _streak_snapshot(child, db)
     return {
         'success': True,
         'childName': child.name,

@@ -135,11 +135,16 @@ def update_profile(
     db: Session = Depends(get_db),
 ):
     if name is not None:
+        name = name.strip()
+        if not 1 <= len(name) <= 30:
+            raise HTTPException(status_code=400, detail='昵称长度需为 1-30 个字符')
         current_user.name = name
     if grade is not None:
+        if not 0 <= grade <= 12:
+            raise HTTPException(status_code=400, detail='年级取值无效')
         current_user.grade = grade
     if avatar_url is not None:
-        current_user.avatar_url = avatar_url
+        current_user.avatar_url = avatar_url[:255]
     db.commit()
     db.refresh(current_user)
     return UserOut.model_validate(current_user)

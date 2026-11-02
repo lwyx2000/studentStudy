@@ -404,6 +404,16 @@ export const useTaskStore = defineStore('task', () => {
     todayTasks.value = seededTasks.map(task => ({ ...task, status: 'pending' }))
   }
 
+  /** 步骤同步：必须带上图片字段，后端是「先删后插」全量替换，漏传等于清空图片 */
+  function stepsPayload(habit: HabitSOP) {
+    return (habit.steps ?? []).map(s => ({
+      instruction: s.instruction,
+      order: s.order,
+      imageUrl: s.imageUrl,
+      gifUrl: s.gifUrl,
+    }))
+  }
+
   function updateHabit(id: string, data: Partial<HabitSOP>) {
     const habit = habits.value.find(h => h.id === id)
     if (!habit) return
@@ -413,7 +423,7 @@ export const useTaskStore = defineStore('task', () => {
         id,
         title: data.title,
         rewardPoints: data.rewardPoints,
-        steps: habit.steps.map(s => ({ instruction: s.instruction, order: s.order })),
+        steps: stepsPayload(habit),
       }).catch((e) => console.warn('更新习惯同步失败', e))
     }
   }
@@ -435,7 +445,7 @@ export const useTaskStore = defineStore('task', () => {
   function syncStepsToBackend(habitId: string) {
     const habit = habits.value.find(h => h.id === habitId)
     if (!habit || !/^\d+$/.test(habitId)) return
-    api.habits.update({ id: habitId, steps: habit.steps.map(s => ({ instruction: s.instruction, order: s.order })) })
+    api.habits.update({ id: habitId, steps: stepsPayload(habit) })
       .catch((e) => console.warn('同步步骤失败', e))
   }
 
@@ -477,8 +487,10 @@ export const useTaskStore = defineStore('task', () => {
     const habit = habits.value.find(h => h.id === id)
     if (habit) {
       habit.active = true
+      // 只回写 active：把整个 habit 展开传给后端会带上 steps，
+      // 而后端的 steps 是「先删后插」全量替换，会把步骤图片一起冲掉
       if (/^\d+$/.test(id)) {
-        api.habits.update({ ...habit, id }).catch(() => {})
+        api.habits.update({ id, active: true }).catch(() => {})
       }
     }
   }

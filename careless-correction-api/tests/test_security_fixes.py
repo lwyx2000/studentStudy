@@ -171,9 +171,9 @@ def test_checkin_points_recomputed_from_db(ctx):
     res = ctx.post('/api/v1/checkins/', params=payload, headers=ctx.child_headers)
     assert res.status_code == 200, res.text
     checkin = res.json()['checkin']
-    assert checkin['total_points'] == 7
-    assert checkin['required_points'] == 7
-    assert checkin['all_done_bonus'] == 0
+    assert checkin['totalPoints'] == 7
+    assert checkin['requiredPoints'] == 7
+    assert checkin['allDoneBonus'] == 0
 
     # 清理，避免影响其他用例
     with SASession(engine) as s:

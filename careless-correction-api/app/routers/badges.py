@@ -274,6 +274,7 @@ def audit_and_fix_unlocks(
     unlocks = db.query(BadgeUnlock).filter(BadgeUnlock.fk_users == child.pk_users).all()
     removed = []
     deducted_sunlight = 0
+    actual_deduct = 0
 
     for u in unlocks:
         badge = db.query(Badge).filter(Badge.pk_badges == u.fk_badges).first()
@@ -298,14 +299,12 @@ def audit_and_fix_unlocks(
             type='spend',
         )
         db.add(history)
-        if actual_deduct < deducted_sunlight:
-            # 阳光不够扣（几乎不可能），用负数记差额不够的部分
-            pass  # 已经扣到 0 为止
 
     db.commit()
 
     return {
         'removed': removed,
         'removed_count': len(removed),
-        'sunlight_deducted': min(deducted_sunlight, child.sunlight_points + deducted_sunlight) if deducted_sunlight > 0 else 0,
+        # 之前这里返回的是「扣前的余额」而不是实际扣掉的数量，前端展示会误导家长
+        'sunlight_deducted': actual_deduct,
     }

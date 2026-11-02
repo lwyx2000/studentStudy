@@ -32,11 +32,28 @@ async def trigger_assessment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    from datetime import date, datetime, timedelta
+
     from app.models import LlmConfig
     from app.services.growth import generate_assessment_prompt
     from app.services.llm import call_llm
 
     target = resolve_target(current_user, child_id, db)
+
+    # 限流：每次评估都要真实调用一次大模型（花钱），连点或脚本刷接口会直接烧额度。
+    # 每次评估都会落一条预警，因此用最近一条预警的时间做 10 分钟节流。
+    last_alert = (
+        db.query(DiagnosticAlert)
+        .filter(
+            DiagnosticAlert.fk_users == target.pk_users,
+            DiagnosticAlert.related_metric == 'task_completion_rate',
+        )
+        .order_by(DiagnosticAlert.created_at.desc())
+        .first()
+    )
+    if last_alert and last_alert.created_at:
+        if datetime.now() - last_alert.created_at < timedelta(minutes=10):
+            raise HTTPException(status_code=429, detail='刚评估过，请 10 分钟后再试')
 
     # LLM config 属于家长
     config_user_id = current_user.pk_users if current_user.role == 'parent' else (
@@ -77,7 +94,6 @@ async def trigger_assessment(
     result = await call_llm(config, prompt)
 
     # ── 落库：写入成长快照与预警 ──
-    from datetime import date
     completion_rate = round(done / total, 4)
     mistake_rate = round(min(1.0, mistake_count / max(total, 1)), 4)
 

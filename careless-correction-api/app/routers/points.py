@@ -175,8 +175,13 @@ def redeem(
         RewardItem.pk_reward_items == reward_item_id,
         RewardItem.active == True,
     ).first()
-    if not item:
+    # 只能兑换挂在目标孩子名下的物品：否则孩子可以拿别人家的物品
+    # （以及家长给别的孩子配置的奖励）来消耗自己的阳光值
+    if not item or item.fk_users != target.pk_users:
         raise HTTPException(status_code=404, detail='兑换物品不存在或已禁用')
+    # 历史数据里可能存在 cost<=0 的物品，直接拒绝，避免「免费兑换 + 记录一笔正向流水」
+    if item.cost <= 0:
+        raise HTTPException(status_code=400, detail='该物品的兑换价无效，请让家长重新设置')
     balance = _spend_sunlight(target, item.cost, db)
     history = SunlightHistory(
         fk_users=target.pk_users,
@@ -217,6 +222,9 @@ def create_reward(
 ):
     # 家长替孩子添加时挂到孩子名下，否则孩子端查不到该物品
     target = resolve_target(current_user, child_id, db)
+    # 兑换价必须为正：负数会让「扣减」变成记一笔正向流水，把历史记录弄乱
+    if cost < 1 or cost > 9999:
+        raise HTTPException(status_code=400, detail='兑换所需阳光值需在 1-9999 之间')
     item = RewardItem(fk_users=target.pk_users, name=name, cost=cost, description=description, icon=icon)
     db.add(item)
     db.commit()
@@ -245,6 +253,8 @@ def update_reward(
     if description is not None:
         item.description = description
     if cost is not None:
+        if cost < 1 or cost > 9999:
+            raise HTTPException(status_code=400, detail='兑换所需阳光值需在 1-9999 之间')
         item.cost = cost
     if icon is not None:
         item.icon = icon

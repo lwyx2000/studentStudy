@@ -10,6 +10,9 @@ from app.services.llm import call_llm
 
 router = APIRouter()
 
+# 读取配置时用占位符代替真实 Key，避免明文回传；保存时收到占位符代表「未修改」
+API_KEY_PLACEHOLDER = '***'
+
 
 def _clean_endpoint(endpoint: str | None) -> str | None:
     """保存前做基础格式校验，避免存入明显不可用的地址。"""
@@ -24,6 +27,18 @@ def _clean_endpoint(endpoint: str | None) -> str | None:
     if len(ep) > 255:
         raise HTTPException(status_code=400, detail='endpoint 过长')
     return ep.rstrip('/')
+
+
+def _clean_api_key(api_key: str | None) -> str | None:
+    """前端拿到的是占位符，原样回传时必须忽略，否则真实 Key 会被 `***` 覆盖。"""
+    if api_key is None:
+        return None
+    key = api_key.strip()
+    if not key or key == API_KEY_PLACEHOLDER:
+        return None
+    if len(key) > 255:
+        raise HTTPException(status_code=400, detail='API Key 过长')
+    return key
 
 
 @router.get('/config')
@@ -43,7 +58,7 @@ def get_config(
             'assessment_prompt': config.assessment_prompt,
             'assessment_cron': config.assessment_cron,
             'enabled': config.enabled,
-            'apiKey': '***' if config.api_key else '',
+            'apiKey': API_KEY_PLACEHOLDER if config.api_key else '',
         }
     }
 
@@ -62,6 +77,7 @@ def update_config(
 ):
     config = db.query(LlmConfig).filter(LlmConfig.fk_users == current_user.pk_users).first()
     endpoint = _clean_endpoint(endpoint)
+    api_key = _clean_api_key(api_key)
     if config:
         if endpoint is not None:
             config.endpoint = endpoint

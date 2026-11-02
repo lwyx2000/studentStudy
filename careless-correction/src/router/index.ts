@@ -141,6 +141,10 @@ const router = createRouter({
   routes,
 })
 
+// 家长身份校验结果按 token 缓存：之前每次进入家长页都会重新拉一遍
+// fetchFromApi（5 个请求），在页面间来回切换时明显拖慢；token 变化（换账号）时重新校验。
+let roleCache: { token: string; role: string } | null = null
+
 router.beforeEach(async (to) => {
   const token = getAuthToken()
 
@@ -151,11 +155,15 @@ router.beforeEach(async (to) => {
   if (!token) return '/login'
 
   if (to.meta.parentOnly) {
+    if (roleCache && roleCache.token === token) {
+      return roleCache.role === 'parent' ? true : '/dashboard'
+    }
     try {
       const store = useUserStore()
       // 刷新页面时 store 的 role 默认是 'child'，主动从 API 加载真实数据
       await store.fetchFromApi()
       if (store.profile.role !== 'parent') return '/dashboard'
+      roleCache = { token, role: store.profile.role }
     } catch { return '/dashboard' }
   }
 

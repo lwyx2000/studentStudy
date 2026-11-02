@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../utils/api'
-import { pendingCheckinCount, refreshPendingCheckinCount, useBadgeStore, useChildSelectStore } from '../../stores'
+import { refreshPendingCheckinCount, useBadgeStore, useChildSelectStore } from '../../stores'
 import PointsBreakdown from '../../components/PointsBreakdown.vue'
 
 const childSelectStore = useChildSelectStore()
@@ -91,7 +91,12 @@ async function toggleDetail(ci: any) {
   loadingDetails.value = false
 }
 
+// 审批失败（网络抖动 / 已被其他设备处理）时要给出提示，
+// 之前是静默 catch，家长点了没反应只能反复点
+const actionError = ref('')
+
 async function approveCheckin(id: number) {
+  actionError.value = ''
   try {
     await api.checkins.approve(id)
     pendingCheckins.value = pendingCheckins.value.filter(c => c.id !== id)
@@ -101,15 +106,19 @@ async function approveCheckin(id: number) {
     }
     await badgeStore.checkAndUnlock(childSelectStore.selectedChildId ?? undefined)
     await loadHistory()
-    // 更新导航栏徽章
-    pendingCheckinCount.value = Math.max(0, pendingCheckinCount.value - 1)
     await refreshPendingCheckinCount()
-  } catch { /* offline */ }
+  } catch (e: any) {
+    actionError.value = e?.message || '审批失败，请稍后重试'
+    // 记录可能已被处理，重新拉一次保证列表与服务端一致
+    await loadPending()
+    await refreshPendingCheckinCount()
+  }
 }
 
 async function rejectCheckin(id: number) {
   const reason = window.prompt('驳回原因（孩子端可见，可留空）：')
   if (reason === null) return // 取消
+  actionError.value = ''
   try {
     await api.checkins.reject(id, reason.trim() || undefined)
     pendingCheckins.value = pendingCheckins.value.filter(c => c.id !== id)
@@ -118,26 +127,55 @@ async function rejectCheckin(id: number) {
       checkinDetails.value = null
     }
     await loadHistory()
-    // 更新导航栏徽章
-    pendingCheckinCount.value = Math.max(0, pendingCheckinCount.value - 1)
     await refreshPendingCheckinCount()
-  } catch { /* offline */ }
+  } catch (e: any) {
+    actionError.value = e?.message || '驳回失败，请稍后重试'
+    await loadPending()
+    await refreshPendingCheckinCount()
+  }
 }
 
 async function reopenCheckin(id: number) {
+  actionError.value = ''
   try {
     await api.checkins.reopen(id)
     await loadHistory()
     await loadPending()
     activeTab.value = 'pending'
     await refreshPendingCheckinCount()
-  } catch { /* offline */ }
+  } catch (e: any) {
+    actionError.value = e?.message || '操作失败，请稍后重试'
+  }
 }
 
+// 一键全部通过：先批量调接口，最后统一刷新一次。
+// 之前是循环调用 approveCheckin，每条都触发「勋章检测 + 刷新历史 + 刷新徽章」，
+// 10 条待审批就是 30+ 个请求，弱网下要转很久。
+const approvingAll = ref(false)
+
 async function approveAll() {
+  if (approvingAll.value) return
   const ids = pendingCheckins.value.map(c => c.id)
-  for (const id of ids) {
-    await approveCheckin(id)
+  if (!ids.length) return
+  approvingAll.value = true
+  actionError.value = ''
+  const failed: number[] = []
+  try {
+    for (const id of ids) {
+      try {
+        await api.checkins.approve(id)
+      } catch {
+        failed.push(id)
+      }
+    }
+    await loadData()
+    await badgeStore.checkAndUnlock(childSelectStore.selectedChildId ?? undefined)
+    await refreshPendingCheckinCount()
+    if (failed.length) {
+      actionError.value = `${failed.length} 条审批失败（可能已在其他设备处理），列表已刷新`
+    }
+  } finally {
+    approvingAll.value = false
   }
 }
 
@@ -215,6 +253,9 @@ function formatTime(iso?: string): string {
     </section>
 
     <template v-else>
+      <!-- 操作失败提示（审批/驳回/重新打开失败时可见） -->
+      <p v-if="actionError" class="action-error">⚠️ {{ actionError }}</p>
+
       <!-- ── Tab: 待审批 ── -->
       <template v-if="activeTab === 'pending'">
         <!-- 批量操作 -->
@@ -222,8 +263,8 @@ function formatTime(iso?: string): string {
           <p class="muted" style="font-size:14px">
             💡 共 {{ pendingCount }} 条待审批，合计 {{ totalPendingPoints }} 阳光值
           </p>
-          <button class="btn batch-approve-btn" @click="approveAll">
-            ⚡ 全部通过
+          <button class="btn batch-approve-btn" :disabled="approvingAll" @click="approveAll">
+            {{ approvingAll ? '处理中…' : '⚡ 全部通过' }}
           </button>
         </section>
 
@@ -551,6 +592,21 @@ function formatTime(iso?: string): string {
   padding: 10px 24px !important;
   font-size: 15px !important;
   white-space: nowrap;
+}
+
+.batch-approve-btn:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.action-error {
+  margin: 0 0 14px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: #fdecea;
+  color: #b3261e;
+  font-weight: 700;
+  font-size: 14px;
 }
 
 /* Checkin items */
