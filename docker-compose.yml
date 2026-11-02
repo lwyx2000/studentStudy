@@ -18,12 +18,19 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - PORT=3001
-      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      # 留空时后端会自动生成随机密钥并持久化到 app_data 卷（.jwt_secret），
+      # 绝不要在编排文件里写死默认值，否则等于把签名密钥公开。
+      - JWT_SECRET=${JWT_SECRET:-}
       - DB_PATH=/app/data/app.db
       - UPLOAD_DIR=/app/uploads
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-8}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://127.0.0.1,capacitor://localhost}
+      - ENABLE_API_DOCS=${ENABLE_API_DOCS:-false}
+      - REGISTER_INVITE_CODE=${REGISTER_INVITE_CODE:-}
       - LLM_ENDPOINT=${LLM_ENDPOINT:-https://api.openai.com/v1}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_ALLOW_PRIVATE_ENDPOINT=${LLM_ALLOW_PRIVATE_ENDPOINT:-false}
     volumes:
       # SQLite 数据库与上传文件持久化（容器重建/升级不丢失）
       - app_data:/app/data

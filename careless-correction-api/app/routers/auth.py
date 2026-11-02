@@ -2,23 +2,54 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth import create_access_token, get_current_user, hash_password, verify_password
+from app.config import Settings
 from app.database import get_db
 from app.models import Assessment, User
-from app.schemas import ChildOut, TokenOut, UserOut
+from app.schemas import TokenOut, UserOut
 
 router = APIRouter()
+settings = Settings()
+
+MIN_PASSWORD_LENGTH = 8
+
+
+def _validate_password(password: str) -> None:
+    """家长/孩子密码强度校验：长度 + 不能纯数字或纯字母。"""
+    if len(password or '') < MIN_PASSWORD_LENGTH:
+        raise HTTPException(status_code=400, detail=f'密码至少 {MIN_PASSWORD_LENGTH} 位')
+    if len(password) > 128:
+        raise HTTPException(status_code=400, detail='密码过长')
+    if password.isdigit() or password.isalpha():
+        raise HTTPException(status_code=400, detail='密码需同时包含字母和数字')
 
 
 @router.post('/register', response_model=TokenOut, status_code=201)
 def register(
     name: str,
     password: str,
+    invite_code: str | None = None,
     db: Session = Depends(get_db),
 ):
-    """注册家长账号"""
+    """注册家长账号。
+
+    首个家长可自由注册；一旦已存在家长账号，必须提供 REGISTER_INVITE_CODE，
+    未配置邀请码时直接禁止新增（家庭私有应用，避免任意人注册后看到家庭数据）。
+    """
+    name = (name or '').strip()
+    if not 2 <= len(name) <= 30:
+        raise HTTPException(status_code=400, detail='用户名长度需为 2-30 个字符')
+    _validate_password(password)
+
     existing = db.query(User).filter(User.name == name, User.role == 'parent').first()
     if existing:
         raise HTTPException(status_code=409, detail='用户名已存在')
+
+    has_parent = db.query(User).filter(User.role == 'parent').first() is not None
+    if has_parent:
+        expected = (settings.register_invite_code or '').strip()
+        if not expected or (invite_code or '').strip() != expected:
+            raise HTTPException(status_code=403, detail='已存在家长账号，注册需要正确的邀请码')
+
     user = User(name=name, role='parent', password_hash=hash_password(password))
     db.add(user)
     db.commit()
@@ -42,24 +73,6 @@ def login(
         raise HTTPException(status_code=401, detail='用户名或密码错误')
     token = create_access_token(user.pk_users, user.role)
     return TokenOut(token=token, user=UserOut.model_validate(user))
-
-
-@router.post('/child-login', response_model=TokenOut)
-def child_login(
-    child_id: int,
-    parent_id: int,
-    db: Session = Depends(get_db),
-):
-    """以孩子身份登录（家长端切换），无需密码，验证父子关系"""
-    child = db.query(User).filter(
-        User.pk_users == child_id,
-        User.fk_users_parent == parent_id,
-        User.role == 'child',
-    ).first()
-    if not child:
-        raise HTTPException(status_code=404, detail='孩子账号不存在')
-    token = create_access_token(child.pk_users, child.role)
-    return TokenOut(token=token, user=UserOut.model_validate(child))
 
 
 @router.get('/session', response_model=UserOut)
@@ -107,6 +120,7 @@ def change_password(
     """修改密码（家长和孩子均可使用）"""
     if not current_user.password_hash or not verify_password(old_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail='原密码错误')
+    _validate_password(new_password)
     current_user.password_hash = hash_password(new_password)
     db.commit()
     return {'success': True}

@@ -41,6 +41,50 @@ def _can_manage_reward(item: RewardItem, current_user: User, db: Session) -> boo
     return owner is not None
 
 
+def _spend_sunlight(target: User, cost: int, db: Session) -> int:
+    """原子扣减阳光值，返回扣减后余额；余额不足抛 400。
+
+    用 `WHERE sunlight_points >= cost` 的条件 UPDATE 完成「检查 + 扣减」，
+    避免「先读余额再减」在连点/并发下把余额扣成负数。
+    """
+    if cost <= 0:
+        return target.sunlight_points
+    updated = (
+        db.query(User)
+        .filter(User.pk_users == target.pk_users, User.sunlight_points >= cost)
+        .update(
+            {User.sunlight_points: User.sunlight_points - cost},
+            synchronize_session=False,
+        )
+    )
+    if not updated:
+        balance = db.query(User.sunlight_points).filter(User.pk_users == target.pk_users).scalar() or 0
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f'阳光值不足，当前 {balance}，需要 {cost}',
+        )
+    db.expire(target)
+    return target.sunlight_points
+
+
+def _spend_apples(target: User, count: int, db: Session) -> int:
+    """原子扣减苹果数量，返回扣减后数量；不足抛 400。"""
+    if count <= 0:
+        return target.apples
+    updated = (
+        db.query(User)
+        .filter(User.pk_users == target.pk_users, User.apples >= count)
+        .update({User.apples: User.apples - count}, synchronize_session=False)
+    )
+    if not updated:
+        balance = db.query(User.apples).filter(User.pk_users == target.pk_users).scalar() or 0
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f'苹果数量不足，当前 {balance}，需要 {count}')
+    db.expire(target)
+    return target.apples
+
+
 @router.get('/balance')
 def get_balance(
     child_id: int | None = None,
@@ -92,12 +136,6 @@ def award_points(
     if amount == 0:
         raise HTTPException(status_code=400, detail='数量不能为 0')
     target = resolve_target(current_user, child_id, db)
-    if amount < 0 and target.sunlight_points < abs(amount):
-        # 余额不足时直接报错，避免流水记 -50 而实际只扣了 20（账实不符）
-        raise HTTPException(
-            status_code=400,
-            detail=f'阳光值不足，当前 {target.sunlight_points}，无法扣除 {abs(amount)}',
-        )
     if amount > 0:
         pending = PendingSunlight(
             fk_users=target.pk_users,
@@ -112,7 +150,7 @@ def award_points(
             'pending': True,
             'newly_unlocked_badges': [],
         }
-    target.sunlight_points = target.sunlight_points + amount
+    balance = _spend_sunlight(target, abs(amount), db)
     history = SunlightHistory(
         fk_users=target.pk_users,
         amount=amount,
@@ -121,7 +159,7 @@ def award_points(
     )
     db.add(history)
     db.commit()
-    return {'balance': target.sunlight_points, 'awarded': amount, 'pending': False, 'newly_unlocked_badges': []}
+    return {'balance': balance, 'awarded': amount, 'pending': False, 'newly_unlocked_badges': []}
 
 
 @router.post('/redeem')
@@ -139,9 +177,7 @@ def redeem(
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail='兑换物品不存在或已禁用')
-    if target.sunlight_points < item.cost:
-        raise HTTPException(status_code=400, detail='阳光值不足')
-    target.sunlight_points -= item.cost
+    balance = _spend_sunlight(target, item.cost, db)
     history = SunlightHistory(
         fk_users=target.pk_users,
         amount=-item.cost,
@@ -150,7 +186,7 @@ def redeem(
     )
     db.add(history)
     db.commit()
-    return {'success': True, 'pointsSpent': item.cost, 'itemName': item.name, 'balance': target.sunlight_points}
+    return {'success': True, 'pointsSpent': item.cost, 'itemName': item.name, 'balance': balance}
 
 
 @router.get('/rewards')
@@ -281,10 +317,11 @@ def grow_apple(
 ):
     """用阳光值种出苹果（100 阳光 = 1 苹果）"""
     target = resolve_target(current_user, child_id, db)
-    if target.sunlight_points < SUNLIGHT_PER_APPLE:
-        raise HTTPException(status_code=400, detail=f'阳光值不足 {SUNLIGHT_PER_APPLE}，无法种出苹果')
-    target.sunlight_points -= SUNLIGHT_PER_APPLE
-    target.apples += 1
+    balance = _spend_sunlight(target, SUNLIGHT_PER_APPLE, db)
+    # 苹果数量同样用 SQL 自增，避免并发覆盖
+    db.query(User).filter(User.pk_users == target.pk_users).update(
+        {User.apples: User.apples + 1}, synchronize_session=False
+    )
     # 阳光值消费记录
     sunlight_history = SunlightHistory(
         fk_users=target.pk_users,
@@ -326,10 +363,13 @@ def award_apples(
     if amount == 0:
         raise HTTPException(status_code=400, detail='数量不能为 0')
     target = resolve_target(current_user, child_id, db)
-    new_total = target.apples + amount
-    if new_total < 0:
-        raise HTTPException(status_code=400, detail='苹果数量不足，无法扣除')
-    target.apples = new_total
+    if amount > 0:
+        db.query(User).filter(User.pk_users == target.pk_users).update(
+            {User.apples: User.apples + amount}, synchronize_session=False
+        )
+        db.expire(target)
+    else:
+        _spend_apples(target, -amount, db)
     history = AppleHistory(
         fk_users=target.pk_users,
         amount=amount,
@@ -357,12 +397,10 @@ def redeem_apple(
     if count <= 0:
         raise HTTPException(status_code=400, detail='兑换数量必须大于 0')
     target = resolve_target(current_user, child_id, db)
-    if target.apples < count:
-        raise HTTPException(status_code=400, detail='苹果数量不足')
 
     if current_user.role == 'parent' and child_id is not None:
         # 家长代兑：直接扣减（保持原有行为，供家长管理页使用）
-        target.apples -= count
+        apples_left = _spend_apples(target, count, db)
         apple_history = AppleHistory(
             fk_users=target.pk_users,
             amount=-count,
@@ -373,7 +411,7 @@ def redeem_apple(
         db.commit()
         return {
             'success': True,
-            'apples': target.apples,
+            'apples': apples_left,
             'redeemed': count,
         }
 
@@ -385,6 +423,8 @@ def redeem_apple(
     ).first()
     if existing_pending:
         raise HTTPException(status_code=400, detail='已有待审批的兑换申请，请等待家长处理')
+    # 预扣苹果：审批期间这部分苹果不可再被消耗/兑换（原子扣减，防并发超扣）
+    apples_left = _spend_apples(target, count, db)
     req = AppleRedemptionRequest(
         fk_users=target.pk_users,
         count=count,
@@ -392,8 +432,6 @@ def redeem_apple(
         status='pending',
     )
     db.add(req)
-    # 预扣苹果：审批期间这部分苹果不可再被消耗/兑换
-    target.apples -= count
     db.add(AppleHistory(
         fk_users=target.pk_users,
         amount=-count,
@@ -406,7 +444,7 @@ def redeem_apple(
         'success': True,
         'submitted': True,
         'requestId': req.pk_apple_redemption_requests,
-        'apples': target.apples,
+        'apples': apples_left,
         'deducted': count,
         'message': '兑换申请已提交，苹果已暂时扣除，等待家长审批（驳回将退回）',
     }
@@ -467,9 +505,25 @@ def approve_apple_redemption(
         raise HTTPException(status_code=403, detail='无权审批该申请')
     if req.status != 'pending':
         raise HTTPException(status_code=400, detail='该申请已处理')
+    # 条件更新抢占：并发/重复点击时只有一次能通过
+    claimed = (
+        db.query(AppleRedemptionRequest)
+        .filter(
+            AppleRedemptionRequest.pk_apple_redemption_requests == request_id,
+            AppleRedemptionRequest.status == 'pending',
+        )
+        .update(
+            {
+                AppleRedemptionRequest.status: 'approved',
+                AppleRedemptionRequest.approved_at: datetime.now(),
+            },
+            synchronize_session=False,
+        )
+    )
+    if not claimed:
+        db.rollback()
+        raise HTTPException(status_code=400, detail='该申请已处理')
     # 苹果已在提交申请时预扣，通过时不再重复扣减，只更新状态与流水描述
-    req.status = 'approved'
-    req.approved_at = datetime.now()
     hist = (
         db.query(AppleHistory)
         .filter(
@@ -486,7 +540,9 @@ def approve_apple_redemption(
     else:
         # 兼容旧数据（提交时未预扣的历史申请）：通过时才扣减
         if child.apples < req.count:
-            req.status = 'rejected'
+            db.query(AppleRedemptionRequest).filter(
+                AppleRedemptionRequest.pk_apple_redemption_requests == request_id
+            ).update({AppleRedemptionRequest.status: 'rejected'}, synchronize_session=False)
             db.commit()
             raise HTTPException(status_code=400, detail='孩子苹果数量不足，申请已自动驳回')
         child.apples -= req.count
@@ -519,9 +575,22 @@ def reject_apple_redemption(
         raise HTTPException(status_code=403, detail='无权审批该申请')
     if req.status != 'pending':
         raise HTTPException(status_code=400, detail='该申请已处理')
-    req.status = 'rejected'
-    # 退回提交申请时预扣的苹果
-    child.apples += req.count
+    # 条件更新抢占：避免同一条申请被重复驳回、重复退还苹果
+    claimed = (
+        db.query(AppleRedemptionRequest)
+        .filter(
+            AppleRedemptionRequest.pk_apple_redemption_requests == request_id,
+            AppleRedemptionRequest.status == 'pending',
+        )
+        .update({AppleRedemptionRequest.status: 'rejected'}, synchronize_session=False)
+    )
+    if not claimed:
+        db.rollback()
+        raise HTTPException(status_code=400, detail='该申请已处理')
+    # 退回提交申请时预扣的苹果（SQL 自增，避免并发覆盖）
+    db.query(User).filter(User.pk_users == child.pk_users).update(
+        {User.apples: User.apples + req.count}, synchronize_session=False
+    )
     db.add(AppleHistory(
         fk_users=child.pk_users,
         amount=req.count,
@@ -529,6 +598,7 @@ def reject_apple_redemption(
         type='earn',
     ))
     db.commit()
+    db.refresh(child)
     return {'success': True, 'childName': child.name, 'refunded': req.count, 'apples': child.apples}
 
 

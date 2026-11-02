@@ -1,19 +1,23 @@
 /**
- * 「保存账号密码」本地凭据管理
- * - 加密后存入 localStorage，5 天后过期
- * - 未过期：登录页自动回填账号密码；过期：自动删除存储的凭据
- * - 说明：采用 XOR + Base64 的设备级混淆（APK WebView 运行在 http 非安全上下文，
- *   无法使用 WebCrypto；本机为家庭私有 Pad，属体验性保护而非强安全加密）
+ * 「记住账号」本地存储
+ *
+ * 只保存登录名，**不再保存密码**。
+ * 早期版本用 XOR + Base64 把密码存在 localStorage，本质上等同于明文
+ * （密钥硬编码在前端代码里），设备被他人拿到即可直接读到密码。
+ * 现在只保留账号名，密码每次登录由用户输入；浏览器/输入法的密码管理器
+ * 才是保存密码的正确位置。
+ *
+ * 旧数据兼容：读到含 password 字段的历史记录时，只取用户名并立即重写存储，
+ * 把已经落盘的密码抹掉。
  */
 
 const STORAGE_KEY = 'cc-saved-credentials'
-const VALID_DAYS = 5
+const VALID_DAYS = 30 // 记住账号的有效期
 const CIPHER_KEY = 'cc-island-pad-2026'
 
-interface StoredCredentials {
+interface StoredAccount {
   username: string
-  password: string
-  savedAt: number // 时间戳，用于 5 天过期判断
+  savedAt: number
 }
 
 function xorTransform(text: string): string {
@@ -36,42 +40,47 @@ function decrypt(text: string): string {
   return decodeURIComponent(escape(xorTransform(text)))
 }
 
-/** 保存凭据（用户勾选「保存账号密码」且登录成功后调用） */
-export function saveCredentials(username: string, password: string) {
-  const data: StoredCredentials = { username, password, savedAt: Date.now() }
+/** 记住账号（登录成功后调用） */
+export function saveCredentials(username: string) {
+  const data: StoredAccount = { username, savedAt: Date.now() }
   try {
     localStorage.setItem(STORAGE_KEY, encode(JSON.stringify(data)))
   } catch { /* 隐私模式等写入失败时静默忽略 */ }
 }
 
-/** 读取凭据：未过期返回明文；已过期自动删除并返回 null */
-export function loadCredentials(): { username: string; password: string } | null {
+/** 读取已记住的账号：未过期返回用户名；已过期自动删除并返回 null */
+export function loadCredentials(): { username: string } | null {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return null
   try {
-    const data = JSON.parse(decrypt(atob(raw))) as StoredCredentials
-    if (!data || typeof data.username !== 'string' || typeof data.password !== 'string') {
+    const data = JSON.parse(decrypt(atob(raw))) as Record<string, unknown>
+    const username = typeof data?.username === 'string' ? data.username : ''
+    if (!username) {
       clearCredentials()
       return null
     }
-    if (Date.now() - data.savedAt > VALID_DAYS * 24 * 60 * 60 * 1000) {
-      // 超过 5 天：删除存储的账号密码，不再自动回填
+    // 历史记录里可能存过密码：立即重写，抹掉已落盘的明文密码
+    if ('password' in data) {
+      saveCredentials(username)
+    }
+    const savedAt = typeof data.savedAt === 'number' ? data.savedAt : 0
+    if (!savedAt || Date.now() - savedAt > VALID_DAYS * 24 * 60 * 60 * 1000) {
       clearCredentials()
       return null
     }
-    return { username: data.username, password: data.password }
+    return { username }
   } catch {
     clearCredentials()
     return null
   }
 }
 
-/** 是否曾经勾选过「保存账号密码」（用于登录页复选框回显） */
+/** 是否曾经勾选过「记住账号」（用于登录页复选框回显） */
 export function hasSavedCredentials(): boolean {
   return !!localStorage.getItem(STORAGE_KEY)
 }
 
-/** 删除已存凭据（用户取消勾选时立即调用） */
+/** 删除已存账号（用户取消勾选时立即调用） */
 export function clearCredentials() {
   localStorage.removeItem(STORAGE_KEY)
 }

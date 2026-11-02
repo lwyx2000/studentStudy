@@ -27,19 +27,20 @@ def _run_migrations():
     """Run schema migrations for existing databases."""
     with engine.connect() as conn:
         insp = inspect(engine)
-        if 't_users' in insp.get_table_names():
+        tables = set(insp.get_table_names())
+        if 't_users' in tables:
             columns = [c['name'] for c in insp.get_columns('t_users')]
             if 'apples' not in columns:
                 conn.execute(text('ALTER TABLE t_users ADD COLUMN apples INTEGER NOT NULL DEFAULT 0'))
         # 子任务可选标记（加分项）
-        if 't_sub_tasks' in insp.get_table_names():
+        if 't_sub_tasks' in tables:
             columns = [c['name'] for c in insp.get_columns('t_sub_tasks')]
             if 'is_optional' not in columns:
                 conn.execute(text('ALTER TABLE t_sub_tasks ADD COLUMN is_optional BOOLEAN NOT NULL DEFAULT 0'))
             if 'reward_points' not in columns:
                 conn.execute(text('ALTER TABLE t_sub_tasks ADD COLUMN reward_points SMALLINT NULL'))
         # 打卡阳光值构成明细
-        if 't_check_ins' in insp.get_table_names():
+        if 't_check_ins' in tables:
             columns = [c['name'] for c in insp.get_columns('t_check_ins')]
             if 'required_points' not in columns:
                 conn.execute(text('ALTER TABLE t_check_ins ADD COLUMN required_points INTEGER NOT NULL DEFAULT 0'))
@@ -53,15 +54,32 @@ def _run_migrations():
                 conn.execute(text('ALTER TABLE t_check_ins ADD COLUMN reject_reason TEXT NULL'))
             if 'completed_tasks_snapshot' not in columns:
                 conn.execute(text('ALTER TABLE t_check_ins ADD COLUMN completed_tasks_snapshot TEXT NULL'))
-        # 苹果兑换审批表由 create_all 创建，无需手工建表
-        # 清理已删除功能的历史表（社区/契约）——先删子表再删父表，避免外键约束
-        existing = set(insp.get_table_names())
-        for table in ('t_covenant_signatures', 't_shared_covenants', 't_post_replies',
-                      't_covenants', 't_community_posts'):
-            if table in existing:
-                conn.execute(text(f'DROP TABLE IF EXISTS {table}'))
+
+        # 一条打卡最多对应一条「待收集阳光」：并发审批曾可能生成多条，导致重复发放。
+        # SQLite 的 UNIQUE 索引允许多个 NULL，因此不影响家长手动发放（fk_check_ins 为空）。
+        if 't_pending_sunlight' in tables:
+            rows = conn.execute(text(
+                'SELECT pk_pending_sunlight, fk_check_ins, collected FROM t_pending_sunlight '
+                'WHERE fk_check_ins IS NOT NULL '
+                'ORDER BY fk_check_ins, collected DESC, pk_pending_sunlight DESC'
+            )).fetchall()
+            seen: set[int] = set()
+            dup_ids: list[int] = []
+            for pk, checkin_id, _collected in rows:
+                if checkin_id in seen:
+                    dup_ids.append(pk)
+                else:
+                    seen.add(checkin_id)
+            for pk in dup_ids:
+                conn.execute(
+                    text('DELETE FROM t_pending_sunlight WHERE pk_pending_sunlight = :pk'),
+                    {'pk': pk},
+                )
+            conn.execute(text(
+                'CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_sunlight_checkin '
+                'ON t_pending_sunlight(fk_check_ins)'
+            ))
         conn.commit()
-    # t_apple_history will be created by create_all below
 
 
 @asynccontextmanager
@@ -77,7 +95,16 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title='小树成长岛 API', version='1.0.0', lifespan=lifespan)
+_docs_enabled = bool(settings.enable_api_docs)
+app = FastAPI(
+    title='小树成长岛 API',
+    version='1.0.0',
+    lifespan=lifespan,
+    # 文档默认关闭：完整 API 结构无需对无关访问者公开
+    docs_url='/docs' if _docs_enabled else None,
+    redoc_url='/redoc' if _docs_enabled else None,
+    openapi_url='/openapi.json' if _docs_enabled else None,
+)
 
 
 @app.get('/health')
@@ -86,14 +113,18 @@ async def health():
     return {'status': 'ok', 'service': 'studentstudy-api'}
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=['*'],
-    allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
-    expose_headers=['X-Refreshed-Token'],
-)
+# CORS 收敛为白名单：默认只允许本地/容器的 WebView 来源。
+# 鉴权走 Authorization 头而非 Cookie，因此不开启 allow_credentials。
+_cors_origins = settings.cors_origin_list
+if settings.cors_allow_all or _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=['*'] if settings.cors_allow_all else _cors_origins,
+        allow_credentials=False,
+        allow_methods=['*'],
+        allow_headers=['*'],
+        expose_headers=['X-Refreshed-Token'],
+    )
 
 
 @app.middleware('http')

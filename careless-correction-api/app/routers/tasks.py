@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_parent
 from app.database import get_db
 from app.models import SubTask, Task, User
 from app.schemas import SubTaskOut, TaskOut
@@ -70,7 +70,12 @@ def _reset_daily_tasks(target_user: User, db: Session):
         task.completed_at = None
         task.completion_photo_url = None
     if stale_tasks:
-        db.commit()
+        # GET 接口顺带写库：并发（多个页面同时拉今日任务）时可能撞写锁，
+        # 此时放弃本次重置即可——状态本身是幂等的，下次访问会重试。
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
 
 
 @router.get('/today')
@@ -203,10 +208,12 @@ def create_task(
     icon: str | None = None,
     week_day: str | None = None,
     child_id: int | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
     """家长创建任务（指定孩子）"""
+    if not 0 <= reward_points <= 999:
+        raise HTTPException(status_code=400, detail='任务分值需在 0-999 之间')
     target = resolve_target_user(current_user, child_id, db)
     task = Task(
         fk_users=target.pk_users,
@@ -234,7 +241,7 @@ def update_task(
     icon: str | None = None,
     week_day: str | None = None,
     active: bool | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
     task = db.query(Task).options(selectinload(Task.sub_tasks)).filter(Task.pk_tasks == task_id).first()
@@ -244,6 +251,8 @@ def update_task(
         owner = db.query(User).filter(User.pk_users == task.fk_users).first()
         if not owner or owner.fk_users_parent != current_user.pk_users:
             raise HTTPException(status_code=403, detail='无权操作')
+    if reward_points is not None and not 0 <= reward_points <= 999:
+        raise HTTPException(status_code=400, detail='任务分值需在 0-999 之间')
     if title is not None:
         task.title = title
     if description is not None:
@@ -266,7 +275,7 @@ def update_task(
 @router.delete('/{task_id}')
 def delete_task(
     task_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
     """软删除：将任务标记为 inactive（不在管理页面显示，但保留在清单中）"""
@@ -286,7 +295,7 @@ def delete_task(
 @router.delete('/{task_id}/permanent')
 def delete_task_permanent(
     task_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
     """永久删除任务（仅从任务清单页面调用）"""
@@ -297,6 +306,8 @@ def delete_task_permanent(
         owner = db.query(User).filter(User.pk_users == task.fk_users).first()
         if not owner or owner.fk_users_parent != current_user.pk_users:
             raise HTTPException(status_code=403, detail='无权操作')
+    # 子任务外键 NOT NULL 且无级联，必须先删子任务再删主任务
+    db.query(SubTask).filter(SubTask.fk_tasks == task_id).delete(synchronize_session=False)
     db.delete(task)
     db.commit()
     return {'success': True}
@@ -345,7 +356,7 @@ def add_subtask(
     sort_order: int = 0,
     is_optional: bool = False,
     reward_points: int | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
     """给任务添加子任务（type 默认继承主任务类别，week_day: weekday/weekend 区分平时和周末；
@@ -382,7 +393,7 @@ def update_subtask(
     sort_order: int | None = None,
     is_optional: bool | None = None,
     reward_points: int | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
     """更新子任务"""
@@ -418,7 +429,7 @@ def update_subtask(
 def delete_subtask(
     task_id: int,
     subtask_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
     """删除子任务"""

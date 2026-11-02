@@ -191,6 +191,20 @@ pipeline {
                                     echo "BACKEND_PORT=${env.BACKEND_PORT}" >> ${deployPath}/.env
                                     echo "已添加 .env: BACKEND_PORT=${env.BACKEND_PORT}"
                                 fi
+
+                                echo "--- 校验 JWT_SECRET（禁止使用公开默认值）---"
+                                CURRENT_SECRET=\$(grep '^JWT_SECRET=' ${deployPath}/.env 2>/dev/null | head -1 | cut -d= -f2-)
+                                if [ -z "\$CURRENT_SECRET" ] || [ "\$CURRENT_SECRET" = "please-change-me-to-a-long-random-secret" ] || [ "\$CURRENT_SECRET" = "dev-secret-change-in-production" ]; then
+                                    NEW_SECRET=\$(LC_ALL=C head -c 96 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 48)
+                                    if grep -q '^JWT_SECRET=' ${deployPath}/.env 2>/dev/null; then
+                                        sed -i "s|^JWT_SECRET=.*|JWT_SECRET=\$NEW_SECRET|" ${deployPath}/.env
+                                    else
+                                        echo "JWT_SECRET=\$NEW_SECRET" >> ${deployPath}/.env
+                                    fi
+                                    echo "已为服务器生成随机 JWT_SECRET"
+                                else
+                                    echo "JWT_SECRET 已配置，保持不变"
+                                fi
                             '
                         """
                     }

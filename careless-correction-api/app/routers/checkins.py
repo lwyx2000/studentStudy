@@ -2,15 +2,21 @@ from datetime import date, datetime, timedelta
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import CheckIn, HabitSOP, PendingSunlight, SOPStep, SubTask, SunlightHistory, Task, User
+from app.models import CheckIn, HabitSOP, PendingSunlight, Task, User
 from app.routers.badges import auto_unlock_badges
+from app.routers.tasks import _matches_week_day
 from app.schemas import TaskOut
 
 router = APIRouter()
+
+# 与前端 HabitPrintableCenter.vue 保持一致
+OPTIONAL_BONUS_POINTS = 2
+ALL_DONE_BONUS_POINTS = 10
 
 
 def _parse_check_date(check_date: str):
@@ -119,14 +125,14 @@ def _refresh_streak_days(child: User, db: Session) -> int:
     return base
 
 
-def _sanitize_completed_tasks_snapshot(raw: str | None) -> str | None:
+def _sanitize_completed_tasks_snapshot(raw: str | None) -> list[dict]:
     """清洗前端传来的完成项快照 JSON：只保留 title/icon/points，限制数量与长度。"""
     if not raw:
-        return None
+        return []
     try:
         data = json.loads(raw)
         if not isinstance(data, list):
-            return None
+            return []
         cleaned = []
         for item in data[:100]:
             if not isinstance(item, dict):
@@ -139,9 +145,9 @@ def _sanitize_completed_tasks_snapshot(raw: str | None) -> str | None:
                 'icon': str(item.get('icon', ''))[:10],
                 'points': max(0, min(9999, int(item.get('points', 0) or 0))),
             })
-        return json.dumps(cleaned, ensure_ascii=False) if cleaned else None
+        return cleaned
     except Exception:
-        return None
+        return []
 
 
 def _load_snapshot(snapshot_json: str | None) -> list[dict]:
@@ -200,37 +206,91 @@ def submit_checkin(
     if _parse_check_date(normalized) > datetime.now().date():
         raise HTTPException(status_code=400, detail='不能给未来日期打卡')
 
-    # 服务端兜底校验：积分不可为负，总分不得超过该孩子当日理论可得上限
-    # （前端计算正确时永远不会触发，仅防御改包/伪造请求刷阳光）
+    # ── 服务端计分：按数据库真实分值重算，不信任客户端传来的分值与分值明细 ──
+    # 之前只做「不太精确的理论上限」夹取，孩子改包即可把 reward_points 抬到上限，
+    # 且快照里的单项分值会被原样展示给家长。这里改为逐项核对数据库。
     total_points = max(0, total_points)
-    task_sum = sum(
-        t.reward_points for t in
-        db.query(Task).filter(Task.fk_users == current_user.pk_users, Task.active == True).all()
-    )
-    # 子任务可单独设分值（可能高于主任务默认分），上限需加上全部子任务的分值总和
-    subtask_sum = sum(
-        (s.reward_points or 0) for s in
-        db.query(SubTask)
-        .join(Task, SubTask.fk_tasks == Task.pk_tasks)
-        .filter(Task.fk_users == current_user.pk_users, Task.active == True).all()
-    )
-    # 习惯计分与前端口径一致：每勾选一步 = 该习惯完整分值（分值 × 步骤数）
-    habit_sum = sum(
-        (h.reward_points or 0) * len(h.steps)
-        for h in db.query(HabitSOP).options(selectinload(HabitSOP.steps))
-              .filter(HabitSOP.fk_users == current_user.pk_users, HabitSOP.active == True).all()
-    )
-    # +10 全完成奖励；可选⭐每项 +2，缓冲按 100 分覆盖极端配置
-    max_possible = max(task_sum, subtask_sum) + habit_sum + 110
-    if total_points > max_possible:
-        total_points = max_possible
-    # 分项同理夹取，保证明细之和不超过总分（审批弹层展示用）
-    required_points = max(0, min(required_points, total_points))
-    habit_points = max(0, min(habit_points, total_points))
-    optional_bonus = max(0, min(optional_bonus, 100))
-    all_done_bonus = max(0, min(all_done_bonus, 10))
+    habit_points = max(0, habit_points)
 
-    snapshot = _sanitize_completed_tasks_snapshot(completed_tasks)
+    check_date_obj = _parse_check_date(normalized) or datetime.now().date()
+    tasks = (
+        db.query(Task)
+        .options(selectinload(Task.sub_tasks))
+        .filter(Task.fk_users == current_user.pk_users, Task.active == True)
+        .all()
+    )
+    # 当天「必做小任务」总数，用于服务端判定全部完成奖励
+    today_required = 0
+    subtask_index: dict[str, tuple[int, bool]] = {}
+    for t in tasks:
+        if not _matches_week_day(t.week_day, check_date_obj):
+            continue
+        for s in t.sub_tasks:
+            if not _matches_week_day(s.week_day, check_date_obj):
+                continue
+            pts = s.reward_points if s.reward_points is not None else (
+                OPTIONAL_BONUS_POINTS if s.is_optional else (t.reward_points or 0)
+            )
+            # 同名子任务以先出现的为准（与前端列表顺序一致）
+            subtask_index.setdefault(
+                s.title.strip(), (max(0, min(int(pts), 999)), bool(s.is_optional))
+            )
+            if not s.is_optional:
+                today_required += 1
+
+    # 习惯计分与前端口径一致：每勾选一步 = 该习惯完整分值（分值 × 步骤数）
+    habits = (
+        db.query(HabitSOP)
+        .options(selectinload(HabitSOP.steps))
+        .filter(HabitSOP.fk_users == current_user.pk_users, HabitSOP.active == True)
+        .all()
+    )
+    habit_sum = sum((h.reward_points or 0) * len(h.steps) for h in habits)
+    habit_points = min(habit_points, habit_sum)
+
+    snapshot_items = _sanitize_completed_tasks_snapshot(completed_tasks)
+
+    if snapshot_items:
+        required_sum = 0
+        optional_count = 0
+        matched_required = 0
+        fixed_items: list[dict] = []
+        for item in snapshot_items:
+            hit = subtask_index.get(str(item.get('title', '')).strip())
+            if hit is None:
+                # 数据库里找不到对应小任务（已被删除或客户端伪造）→ 不计分
+                fixed_items.append({**item, 'points': 0, 'verified': False})
+                continue
+            pts, is_optional = hit
+            if is_optional:
+                optional_count += 1
+                fixed_items.append({**item, 'points': OPTIONAL_BONUS_POINTS, 'verified': True})
+            else:
+                required_sum += pts
+                matched_required += 1
+                fixed_items.append({**item, 'points': pts, 'verified': True})
+
+        all_done = today_required > 0 and matched_required >= today_required
+        all_done_bonus = ALL_DONE_BONUS_POINTS if all_done else 0
+        optional_bonus = optional_count * OPTIONAL_BONUS_POINTS
+        required_points = required_sum
+        cap = required_sum + optional_bonus + all_done_bonus + habit_points
+        total_points = min(total_points, cap)
+        snapshot = json.dumps(fixed_items, ensure_ascii=False) if fixed_items else None
+    else:
+        # 无快照（旧客户端）：沿用理论上限夹取
+        task_sum = sum(t.reward_points or 0 for t in tasks)
+        subtask_sum = sum((s.reward_points or 0) for t in tasks for s in t.sub_tasks)
+        max_possible = max(task_sum, subtask_sum) + habit_sum + 110
+        total_points = min(total_points, max_possible)
+        required_points = max(0, min(required_points, total_points))
+        optional_bonus = max(0, min(optional_bonus, 100))
+        all_done_bonus = max(0, min(all_done_bonus, 10))
+        snapshot = None
+
+    # 快照非空时，完成任务数以快照条目数为准，避免与家长看到的明细条数不一致
+    if snapshot_items:
+        task_count = len(snapshot_items)
 
     # 支持同日多次提交：如果当天已有未审批通过的打卡，用新提交覆盖旧记录（保留 id 与 created_at，仅更新积分与快照）
     # 已通过(approved)的记录不允许重复提交，避免同一天重复获得阳光
@@ -502,13 +562,32 @@ def approve_checkin(
         raise HTTPException(status_code=403, detail='无权审批该打卡')
     if record.status not in ('pending', 'rejected'):
         raise HTTPException(status_code=400, detail='该打卡已审批')
-    record.status = 'approved'
-    record.approved_at = datetime.now()
-    record.reject_reason = None
+
+    # 条件更新「抢占」这次审批：并发重复点击时只有一个请求真正通过，
+    # 避免同一条打卡被审批两次、生成两份待收集阳光。
+    approved_at = datetime.now()
+    claimed = (
+        db.query(CheckIn)
+        .filter(
+            CheckIn.pk_check_ins == checkin_id,
+            CheckIn.status.in_(['pending', 'rejected']),
+        )
+        .update(
+            {
+                CheckIn.status: 'approved',
+                CheckIn.approved_at: approved_at,
+                CheckIn.reject_reason: None,
+            },
+            synchronize_session=False,
+        )
+    )
+    if not claimed:
+        db.rollback()
+        raise HTTPException(status_code=400, detail='该打卡已审批')
+
     # 不再直接增加 sunlight_points，而是生成「待收集阳光」记录
     # 孩子需在阳光树页面点击收集后才正式变为阳光值
     if record.total_points > 0:
-        # 该打卡已有待收集阳光（含已收集）时不再重复生成，避免重复发放
         already_created = (
             db.query(PendingSunlight)
             .filter(PendingSunlight.fk_check_ins == record.pk_check_ins)
@@ -519,18 +598,24 @@ def approve_checkin(
             if not already_created.collected and already_created.amount != record.total_points:
                 already_created.amount = record.total_points
         else:
-            pending = PendingSunlight(
-                fk_users=child.pk_users,
-                amount=record.total_points,
-                reason=f'打卡审批通过（{record.check_date}）',
-                fk_check_ins=record.pk_check_ins,
-                collected=False,
+            # 唯一索引 uq_pending_sunlight_checkin 兜底：并发下第二条自动忽略
+            db.execute(
+                sqlite_insert(PendingSunlight)
+                .values(
+                    fk_users=child.pk_users,
+                    amount=record.total_points,
+                    reason=f'打卡审批通过（{record.check_date}）',
+                    fk_check_ins=record.pk_check_ins,
+                    collected=False,
+                    created_at=approved_at,
+                )
+                .on_conflict_do_nothing(index_elements=['fk_check_ins'])
             )
-            db.add(pending)
     # 更新连续打卡天数：以今天为锚点重算，不受补打卡历史日期影响
     db.flush()
     _refresh_streak_days(child, db)
     db.commit()
+    db.refresh(record)
     db.refresh(child)
     # Auto-unlock badges after checkin approval
     newly_unlocked = auto_unlock_badges(child, db)
@@ -562,8 +647,19 @@ def reject_checkin(
         raise HTTPException(status_code=403, detail='无权审批该打卡')
     if record.status != 'pending':
         raise HTTPException(status_code=400, detail='该打卡已审批')
-    record.status = 'rejected'
-    record.reject_reason = (reason or '').strip()[:500] or None
+    reject_reason = (reason or '').strip()[:500] or None
+    # 条件更新：与 approve 并发时只有一方生效
+    claimed = (
+        db.query(CheckIn)
+        .filter(CheckIn.pk_check_ins == checkin_id, CheckIn.status == 'pending')
+        .update(
+            {CheckIn.status: 'rejected', CheckIn.reject_reason: reject_reason},
+            synchronize_session=False,
+        )
+    )
+    if not claimed:
+        db.rollback()
+        raise HTTPException(status_code=400, detail='该打卡已审批')
     db.commit()
     return {'success': True, 'childName': child.name}
 

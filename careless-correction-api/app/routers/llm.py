@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,21 @@ from app.models import LlmConfig, User
 from app.services.llm import call_llm
 
 router = APIRouter()
+
+
+def _clean_endpoint(endpoint: str | None) -> str | None:
+    """保存前做基础格式校验，避免存入明显不可用的地址。"""
+    if endpoint is None:
+        return None
+    ep = endpoint.strip()
+    if not ep:
+        return ''
+    parsed = urlparse(ep)
+    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+        raise HTTPException(status_code=400, detail='endpoint 必须是 http(s):// 开头的完整地址')
+    if len(ep) > 255:
+        raise HTTPException(status_code=400, detail='endpoint 过长')
+    return ep.rstrip('/')
 
 
 @router.get('/config')
@@ -44,6 +61,7 @@ def update_config(
     db: Session = Depends(get_db),
 ):
     config = db.query(LlmConfig).filter(LlmConfig.fk_users == current_user.pk_users).first()
+    endpoint = _clean_endpoint(endpoint)
     if config:
         if endpoint is not None:
             config.endpoint = endpoint

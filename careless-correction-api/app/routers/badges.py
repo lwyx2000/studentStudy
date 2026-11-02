@@ -2,6 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -12,6 +13,20 @@ from app.models import (
 )
 
 router = APIRouter()
+
+
+def _norm_date_key(raw) -> str:
+    """把 2026/9/1 这类写法归一成 2026-09-01，用于按天比对。"""
+    if hasattr(raw, 'isoformat'):
+        return raw.isoformat()
+    s = str(raw or '').strip().replace('/', '-').replace('.', '-')
+    parts = s.split('-')
+    if len(parts) == 3:
+        try:
+            return f'{int(parts[0]):04d}-{int(parts[1]):02d}-{int(parts[2]):02d}'
+        except ValueError:
+            return s
+    return s
 
 
 def resolve_target(current_user: User, child_id: int | None, db: Session) -> User:
@@ -48,13 +63,21 @@ def _compute_requirement_progress(requirement_type: str, requirement_value: int,
             MistakeRecord.fk_users == uid
         ).count()
     elif requirement_type == 'zero_loss_days':
-        # Count approved checkins with zero item loss on that date
-        return db.query(CheckIn).filter(
-            CheckIn.fk_users == uid,
-            CheckIn.status == 'approved',
-        ).count() - db.query(ItemLossRecord).filter(
-            ItemLossRecord.fk_users == uid
-        ).count()
+        # 「零丢失天数」= 已通过打卡的日期中，当天没有物品丢失记录的天数。
+        # 旧实现用「审批数 − 丢失记录数」，丢失记录是累计的，会算出负数，语义也不对。
+        checkin_dates = {
+            _norm_date_key(r[0])
+            for r in db.query(CheckIn.check_date).filter(
+                CheckIn.fk_users == uid, CheckIn.status == 'approved'
+            ).distinct().all()
+        }
+        loss_dates = {
+            _norm_date_key(r[0])
+            for r in db.query(ItemLossRecord.lost_date).filter(
+                ItemLossRecord.fk_users == uid
+            ).distinct().all()
+        }
+        return len(checkin_dates - loss_dates)
     elif requirement_type == 'apple_count':
         return target.apples or 0
     elif requirement_type == 'sunlight_earned_total':
@@ -87,13 +110,27 @@ def auto_unlock_badges(target: User, db: Session) -> list[dict]:
         )
 
         if progress >= badge.requirement_value:
-            unlock = BadgeUnlock(
-                fk_users=target.pk_users,
-                fk_badges=badge.pk_badges,
+            # 用 ON CONFLICT DO NOTHING 抢占解锁记录：并发（如同时收集阳光与审批打卡）
+            # 时只有一个请求能插入成功，从而避免重复发放勋章奖励或主键/唯一约束报错。
+            result = db.execute(
+                sqlite_insert(BadgeUnlock.__table__)
+                .values(
+                    fk_users=target.pk_users,
+                    fk_badges=badge.pk_badges,
+                    unlocked_at=datetime.now(),
+                )
+                .on_conflict_do_nothing(index_elements=['fk_users', 'fk_badges'])
             )
-            db.add(unlock)
+            if not result.rowcount:
+                continue  # 已被并发请求解锁
+            existing_unlocks.add(badge.pk_badges)
             if badge.reward_points:
-                target.sunlight_points += badge.reward_points
+                # 阳光值用 SQL 自增，避免并发下互相覆盖余额
+                db.query(User).filter(User.pk_users == target.pk_users).update(
+                    {User.sunlight_points: User.sunlight_points + badge.reward_points},
+                    synchronize_session=False,
+                )
+                db.expire(target)
                 # 记录阳光值变动历史（勋章奖励）
                 reward_history = SunlightHistory(
                     fk_users=target.pk_users,
@@ -169,10 +206,23 @@ def unlock_badge(
     progress = _compute_requirement_progress(badge.requirement_type, badge.requirement_value, target, db)
     if progress < badge.requirement_value:
         raise HTTPException(status_code=400, detail=f'未满足解锁条件（当前进度 {progress}/{badge.requirement_value}）')
-    unlock = BadgeUnlock(fk_users=target.pk_users, fk_badges=badge_id)
-    db.add(unlock)
+    result = db.execute(
+        sqlite_insert(BadgeUnlock.__table__)
+        .values(
+            fk_users=target.pk_users,
+            fk_badges=badge_id,
+            unlocked_at=datetime.now(),
+        )
+        .on_conflict_do_nothing(index_elements=['fk_users', 'fk_badges'])
+    )
+    if not result.rowcount:
+        db.rollback()
+        raise HTTPException(status_code=409, detail='已解锁')
     if badge.reward_points:
-        target.sunlight_points += badge.reward_points
+        db.query(User).filter(User.pk_users == target.pk_users).update(
+            {User.sunlight_points: User.sunlight_points + badge.reward_points},
+            synchronize_session=False,
+        )
         # 记录阳光值变动历史（手动解锁勋章奖励）
         reward_history = SunlightHistory(
             fk_users=target.pk_users,
@@ -181,9 +231,8 @@ def unlock_badge(
             type='earn',
         )
         db.add(reward_history)
-    # commit 必须在 if 块外：无奖励阳光的勋章也要把解锁记录落库，
-    # 否则事务回滚后下次还能重复解锁
     db.commit()
+    db.refresh(target)
     return {'success': True, 'badge': badge}
 
 

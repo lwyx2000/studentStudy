@@ -441,3 +441,9 @@ class PendingSunlight(Base):
 
     user = relationship('User', backref='pending_sunlight')
     checkin = relationship('CheckIn', backref='pending_sunlight_records')
+
+    # 一条打卡最多生成一条待收集阳光（SQLite 的 UNIQUE 允许多个 NULL，
+    # 因此家长手动发放的、未关联打卡的记录不受影响）
+    __table_args__ = (
+        UniqueConstraint('fk_check_ins', name='uq_pending_sunlight_checkin'),
+    )

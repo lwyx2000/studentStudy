@@ -2,9 +2,20 @@ __pycache__/
 *.pyc
 .git
 .gitignore
-data/
-uploads/
 .idea/
 .venv/
 venv/
 *.log
+
+# 本地数据与上传文件：绝不能打进镜像（容器内用数据卷）
+data/
+uploads/
+
+# 敏感配置：.env 只应存在于部署目录，镜像里不带任何密钥
+.env
+.env.*
+!.env.example
+
+# 测试与开发辅助，镜像不需要
+tests/
+.pytest_cache/

@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_parent
 from app.database import get_db
 from app.models import HabitSOP, SOPStep, User
 
@@ -126,7 +126,7 @@ def update_habit(
     habit_id: int,
     data: HabitUpdateInput,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
 ):
     habit = (
         db.query(HabitSOP)
@@ -144,6 +144,8 @@ def update_habit(
     if data.difficulty_level is not None:
         habit.difficulty_level = data.difficulty_level
     if data.reward_points is not None:
+        if not 0 <= data.reward_points <= 999:
+            raise HTTPException(status_code=400, detail='习惯分值需在 0-999 之间')
         habit.reward_points = data.reward_points
     if data.active is not None:
         habit.active = data.active
@@ -174,7 +176,7 @@ def update_habit(
 def create_habit(
     data: HabitCreateInput,
     child_id: int | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
     target = resolve_target(current_user, child_id, db)
@@ -211,7 +213,7 @@ def create_habit(
 @router.delete('/{habit_id}')
 def delete_habit(
     habit_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
     """软删除：将习惯标记为 inactive"""
@@ -231,7 +233,7 @@ def delete_habit(
 @router.delete('/{habit_id}/permanent')
 def delete_habit_permanent(
     habit_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
     """永久删除习惯（仅从清单页面调用）"""

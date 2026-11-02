@@ -1,13 +1,29 @@
 from datetime import datetime, timedelta
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.config import Settings
 from app.database import get_db
 from app.models import MistakeRecord, MistakeReview, User
 
 router = APIRouter()
+settings = Settings()
+
+
+def _detect_image_ext(content: bytes) -> str | None:
+    """按文件头判断图片类型，不信任客户端声明的 Content-Type / 扩展名。"""
+    if content.startswith(b'\xff\xd8\xff'):
+        return '.jpg'
+    if content.startswith(b'\x89PNG\r\n\x1a\n'):
+        return '.png'
+    if content[:4] == b'RIFF' and content[8:12] == b'WEBP':
+        return '.webp'
+    if content[:6] in (b'GIF87a', b'GIF89a'):
+        return '.gif'
+    return None
 
 
 def resolve_target(current_user: User, child_id: int | None, db: Session) -> User:
@@ -29,18 +45,26 @@ async def upload_image(
     image: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
-    import re
     from pathlib import Path
-    from app.config import Settings
 
-    upload_dir = Path(Settings().upload_dir)
-    upload_dir.mkdir(exist_ok=True)
-    # 消毒客户端文件名：只保留安全字符，防路径穿越（../）与奇异字符
-    safe_name = re.sub(r'[^\w.\-]', '_', Path(image.filename or 'img.jpg').name)[:80]
-    file_path = upload_dir / f'mistake_{datetime.now().timestamp():.0f}_{safe_name}'
-    content = await image.read()
-    file_path.write_bytes(content)
-    return {'imageUrl': f'/uploads/{file_path.name}'}
+    max_bytes = max(1, settings.max_upload_mb) * 1024 * 1024
+    # 分块上限读取：超过上限立即拒绝，避免大文件整块进内存
+    content = await image.read(max_bytes + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail='上传文件为空')
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail=f'图片不能超过 {settings.max_upload_mb} MB')
+
+    ext = _detect_image_ext(content)
+    if not ext:
+        raise HTTPException(status_code=400, detail='仅支持 JPG / PNG / WEBP / GIF 图片')
+
+    upload_dir = Path(settings.upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    # 文件名完全由服务端生成（随机），不含用户输入：既防路径穿越，也避免被枚举
+    file_name = f'mistake_{uuid.uuid4().hex}{ext}'
+    (upload_dir / file_name).write_bytes(content)
+    return {'imageUrl': f'/uploads/{file_name}'}
 
 
 @router.post('/', status_code=201)

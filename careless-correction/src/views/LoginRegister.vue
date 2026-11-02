@@ -16,22 +16,16 @@ const password = ref('')
 const confirmPassword = ref('')
 const error = ref('')
 const loading = ref(false)
-// 自动登录已在后台进行（隐藏液表单，避免用户误删改自动填入的凭据）
-const autoLogging = ref(false)
-// 保存账号密码（加密存前端，5 天过期）
+// 记住账号（只存用户名，不存密码）
 const savePwd = ref(false)
 
-// 进入登录页时回填未过期的已存凭据；已过期的由 loadCredentials 内部自动删除
+// 进入登录页时回填已记住的账号名；密码不再本地保存，需用户输入。
+// （已登录用户由 App 启动时的 token 校验直接进入主页，不依赖这里的自动登录）
 onMounted(() => {
   const cred = loadCredentials()
   if (cred) {
     name.value = cred.username
-    password.value = cred.password
     savePwd.value = true
-
-    // ★ 已存凭据未过期：直接静默自动登录，不打扰用户手动点击
-    autoLogging.value = true
-    submit().finally(() => { autoLogging.value = false })
   }
 })
 
@@ -41,9 +35,20 @@ async function submit() {
     error.value = '请填写用户名和密码'
     return
   }
-  if (mode.value === 'register' && password.value !== confirmPassword.value) {
-    error.value = '两次密码不一致'
-    return
+  if (mode.value === 'register') {
+    if (password.value !== confirmPassword.value) {
+      error.value = '两次密码不一致'
+      return
+    }
+    // 与后端一致的前置提示，避免提交后才报错
+    if (password.value.length < 8) {
+      error.value = '密码至少 8 位'
+      return
+    }
+    if (!/[a-zA-Z]/.test(password.value) || !/\d/.test(password.value)) {
+      error.value = '密码需同时包含字母和数字'
+      return
+    }
   }
   loading.value = true
   try {
@@ -55,9 +60,9 @@ async function submit() {
     userStore.setProfile(normalizeUser(res.user))
     userStore.completeOnboarding()
 
-    // 勾选了「保存账号密码」则加密存下（重新记录 5 天有效期）；取消勾选则清除
+    // 勾选了「记住账号」则存下用户名；取消勾选则清除
     if (mode.value === 'login') {
-      if (savePwd.value) saveCredentials(name.value.trim(), password.value)
+      if (savePwd.value) saveCredentials(name.value.trim())
       else clearCredentials()
     }
 
@@ -71,11 +76,6 @@ async function submit() {
     router.replace(userStore.profile.role === 'parent' ? '/parent' : '/dashboard')
   } catch (e: any) {
     error.value = e.message || '操作失败，请重试'
-    // 自动登录失败（密码被改/服务器不可达）：清空错误提示，保留表单回填，让用户手动登录或修改密码
-    if (autoLogging.value) {
-      error.value = '自动登录失败，请重新输入密码登录'
-      password.value = ''
-    }
   } finally {
     loading.value = false
   }
@@ -165,17 +165,9 @@ const particlesOptions: ISourceOptions = {
           <div class="tab-slider" :class="{ right: mode === 'register' }" />
         </div>
 
-        <!-- ★ 自动登录中：卡片仅显示进度提示，隐藏表单避免误改自动填入的凭据 -->
-        <div v-if="autoLogging" class="auto-login-hint">
-          <span class="dot-loader">
-            <i /><i /><i />
-          </span>
-          <span>正在自动登录…</span>
-        </div>
-
         <!-- 表单 (带切换动画) -->
         <Transition name="form-slide" mode="out-in">
-          <div v-if="!autoLogging" :key="mode" class="form">
+          <div :key="mode" class="form">
             <label class="field">
               <span>用户名</span>
               <div class="input-row">
@@ -202,7 +194,7 @@ const particlesOptions: ISourceOptions = {
 
             <label v-if="mode === 'login'" class="save-pwd-row">
               <input v-model="savePwd" type="checkbox" />
-              <span>💾 保存账号密码（5 天内自动填写，过期后自动清除）</span>
+              <span>💾 记住账号（仅保存用户名，密码不落盘）</span>
             </label>
 
             <Transition name="err">

@@ -62,7 +62,12 @@ async def trigger_assessment(
         ItemLossRecord.fk_users == target.pk_users,
     ).scalar() or 0
 
-    habit = db.query(HabitSOP).order_by(HabitSOP.created_at.desc()).first()
+    habit = (
+        db.query(HabitSOP)
+        .filter(HabitSOP.fk_users == target.pk_users, HabitSOP.active == True)
+        .order_by(HabitSOP.created_at.desc())
+        .first()
+    )
     prompt = generate_assessment_prompt(
         mistake_count=mistake_count,
         completion_rate=round(done / total * 100),

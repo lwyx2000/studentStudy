@@ -17,6 +17,8 @@ const switching = ref<string | null>(null)
 const newName = ref('')
 const newGrade = ref(3)
 const addError = ref('')
+// 新建成功后展示的初始账号（密码只在创建时返回一次，需家长转告孩子）
+const createdCredential = ref<{ name: string; loginName: string; password: string } | null>(null)
 
 // 编辑
 const editingId = ref<string | null>(null)
@@ -41,6 +43,14 @@ async function addChild() {
   try {
     const res = await api.children.add({ name: newName.value.trim(), grade: newGrade.value })
     children.value.push(normalizeChild(res))
+    // 初始密码只在此次响应里返回，必须立刻告诉家长
+    if (res?.initialPassword) {
+      createdCredential.value = {
+        name: res.name ?? newName.value.trim(),
+        loginName: res.login_name ?? res.loginName ?? '',
+        password: res.initialPassword,
+      }
+    }
     newName.value = ''
     newGrade.value = 3
     adding.value = false
@@ -140,6 +150,25 @@ onMounted(loadChildren)
         <button class="btn" :disabled="!newName.trim()" @click="addChild">确认添加</button>
       </div>
       <p v-if="addError" class="error-msg">{{ addError }}</p>
+    </section>
+
+    <!-- 新建孩子的初始账号：密码只在创建时返回一次 -->
+    <section v-if="createdCredential" class="panel credential-panel">
+      <div class="card-title">
+        <h2>✅ {{ createdCredential.name }} 的登录账号</h2>
+        <button class="btn ghost" style="padding:6px 12px;font-size:13px" @click="createdCredential = null">知道了</button>
+      </div>
+      <p class="lead">
+        请把下面的账号告诉孩子，登录后可在「我的」里修改密码。密码只显示这一次，关闭后无法再次查看。
+      </p>
+      <div class="credential-row">
+        <span>登录名</span>
+        <code>{{ createdCredential.loginName }}</code>
+      </div>
+      <div class="credential-row">
+        <span>初始密码</span>
+        <code>{{ createdCredential.password }}</code>
+      </div>
     </section>
 
     <!-- 孩子列表 -->
@@ -299,6 +328,33 @@ onMounted(loadChildren)
   font-weight: 700;
   font-size: 14px;
   margin-top: 8px;
+}
+.credential-panel {
+  border: 2px solid #ffe08a;
+  background: linear-gradient(180deg, #fffdf3, #fff8e1);
+}
+.credential-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-top: 8px;
+  border-radius: 14px;
+  background: #fff;
+  font-weight: 800;
+  font-size: 14px;
+}
+.credential-row span {
+  width: 72px;
+  color: var(--muted);
+  flex: none;
+}
+.credential-row code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 16px;
+  letter-spacing: .04em;
+  color: #7a4b00;
+  user-select: all;
 }
 button:disabled {
   opacity: .6;
