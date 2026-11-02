@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGrowthStore, useParentStore, useTaskStore, useUserStore } from '../../stores'
 import { api, normalizeSubTask } from '../../utils/api'
@@ -277,11 +277,15 @@ const allRequiredDone = computed(() =>
 )
 
 // ── 打卡成功即时反馈：阳光掉落 + 阳光值 +N 浮层动画 ──
-const celebration = ref<{ active: boolean; points: number }>({ active: false, points: 0 })
+const celebration = ref<{ active: boolean; points: number; showScore: boolean }>({
+  active: false,
+  points: 0,
+  showScore: true,
+})
 const celebrationSuns = ref<{ left: number; delay: number; size: number }[]>([])
 let celebrationTimer: ReturnType<typeof setTimeout> | null = null
 
-function celebrate(points: number) {
+function celebrate(points: number, showScore = true) {
   // 掉落的小太阳数量随本次得分波动，上限不夸张
   const count = Math.max(1, Math.min(Math.round(points / 2), 14))
   celebrationSuns.value = Array.from({ length: count }, (_, i) => ({
@@ -289,11 +293,98 @@ function celebrate(points: number) {
     delay: (i * 90 + Math.random() * 120) / 1000,
     size: 26 + Math.random() * 14,
   }))
-  celebration.value = { active: true, points }
+  celebration.value = { active: true, points, showScore }
   if (celebrationTimer) clearTimeout(celebrationTimer)
   celebrationTimer = setTimeout(() => {
-    celebration.value = { active: false, points: 0 }
+    celebration.value = { active: false, points: 0, showScore: true }
   }, 3200)
+}
+
+// ── 连续打卡天数（多邻国式连击）──
+const currentStreak = ref(0)
+const bestStreak = ref(0)
+
+interface StreakCelebration {
+  active: boolean
+  days: number
+  points: number
+  isNewToday: boolean
+  isNewRecord: boolean
+  milestone: string
+}
+const streakShow = ref<StreakCelebration>({
+  active: false,
+  days: 0,
+  points: 0,
+  isNewToday: false,
+  isNewRecord: false,
+  milestone: '',
+})
+const streakNumber = ref(0)
+let streakTimer: ReturnType<typeof setTimeout> | null = null
+let streakRaf: number | null = null
+
+function milestoneText(days: number): string {
+  if (days >= 365) return '🏆 整整一年！你把坚持变成了习惯'
+  if (days >= 200) return `👑 ${days} 天连击，太不可思议了`
+  if (days >= 100) return `💯 ${days} 天里程碑，你就是坚持本人`
+  if (days >= 50) return `🌟 ${days} 天！小树已经长成大树`
+  if (days >= 30) return `🌳 连续 ${days} 天，习惯彻底扎根`
+  if (days >= 21) return `🌿 ${days} 天，行为开始自动运转`
+  if (days >= 14) return `🔥 连续 ${days} 天，两周不断`
+  if (days >= 7) return `🎉 已连续 ${days} 天，超过一周啦`
+  if (days >= 3) return `✨ 已经坚持 ${days} 天，势头正好`
+  if (days === 2) return '💪 连续两天，明天继续'
+  return '🌱 打卡开始，明天也来哦'
+}
+
+function showStreakCelebration(
+  streak: { days?: number; bestDays?: number; isNewToday?: boolean } | undefined,
+  points: number,
+) {
+  const days = Math.max(1, Number(streak?.days ?? 0) || 1)
+  const best = Math.max(Number(streak?.bestDays ?? 0) || 0, days)
+  currentStreak.value = days
+  bestStreak.value = best
+  streakShow.value = {
+    active: true,
+    days,
+    points,
+    isNewToday: streak?.isNewToday !== false,
+    isNewRecord: days > 1 && days >= best,
+    milestone: milestoneText(days),
+  }
+  // 数字从 0 滚到目标值，像多邻国的连击计数
+  streakNumber.value = 0
+  if (streakRaf !== null) cancelAnimationFrame(streakRaf)
+  const start = performance.now()
+  const duration = 720
+  const tick = (now: number) => {
+    const p = Math.min(1, (now - start) / duration)
+    const eased = 1 - Math.pow(1 - p, 3)
+    streakNumber.value = Math.round(days * eased)
+    if (p < 1) streakRaf = requestAnimationFrame(tick)
+    else streakNumber.value = days
+  }
+  streakRaf = requestAnimationFrame(tick)
+
+  if (streakTimer) clearTimeout(streakTimer)
+  streakTimer = setTimeout(() => {
+    streakShow.value = { ...streakShow.value, active: false }
+  }, 4200)
+}
+
+function closeStreakCelebration() {
+  if (streakTimer) clearTimeout(streakTimer)
+  streakShow.value = { ...streakShow.value, active: false }
+}
+
+async function loadStreakSummary() {
+  try {
+    const res = await api.checkins.getStats(undefined, 7)
+    currentStreak.value = res.streakDays ?? 0
+    bestStreak.value = res.bestStreakDays ?? 0
+  } catch { /* offline */ }
 }
 
 async function submitChecklist() {
@@ -344,7 +435,7 @@ async function submitChecklist() {
   if (totalPoints > 0) {
     const wasRejected = checkinStatus.value?.status === 'rejected'
     try {
-      await api.checkins.submit({
+      const submitRes = await api.checkins.submit({
         checkDate: activeDate,
         totalPoints,
         habitStepCount: checkedHabitSteps.value.length,
@@ -368,8 +459,12 @@ async function submitChecklist() {
       localStorage.setItem(`cc-checklist-count-${lsDateKey}`, String(submitCount.value))
       submitting.value = false
 
-      // ★ 提交成功立刻给正反馈：阳光掉落 + 计分浮层
-      celebrate(totalPoints)
+      // ★ 提交成功立刻给正反馈：连续打卡连击动画 + 阳光掉落
+      const streak = submitRes?.streak
+      celebrate(totalPoints, !streak)
+      if (streak && isToday) {
+        showStreakCelebration(streak, totalPoints)
+      }
 
       const extras: string[] = []
       if (allRequiredDone.value) extras.push(`全部完成奖励 +${ALL_DONE_BONUS_POINTS}`)
@@ -390,9 +485,22 @@ async function submitChecklist() {
       if (checkinStatus.value && checkinStatus.value.status === 'rejected') {
         checkinStatus.value = { ...checkinStatus.value, status: 'pending', rejectReason: null }
       }
-    } catch {
+    } catch (e: any) {
       submitting.value = false
-      submitMessage.value = `打卡提交异常，请稍后重试（本次 +${totalPoints} 阳光值）`
+      const msg = typeof e?.message === 'string' ? e.message : ''
+      // 后端明确拒绝时给出具体原因，而不是笼统的"提交异常"
+      if (msg.includes('已审批通过')) {
+        submitMessage.value = '✅ 今天的打卡已经通过审批，不用再提交啦'
+        if (checkinStatus.value) {
+          checkinStatus.value = { ...checkinStatus.value, status: 'approved', rejectReason: null }
+        }
+        localStorage.setItem(submittedKey, 'true')
+        submitted.value = true
+      } else if (msg.includes('未来日期')) {
+        submitMessage.value = '⏰ 不能给未来的日期打卡哦'
+      } else {
+        submitMessage.value = `打卡提交异常，请稍后重试（本次 +${totalPoints} 阳光值）`
+      }
     }
   } else {
     submitting.value = false
@@ -487,8 +595,15 @@ onMounted(async () => {
     taskStore.fetchFromApi(undefined, true).then(loadChecklistItems),
     userStore.fetchFromApi(),
     loadCheckinStatus().then(restoreSubmitStats),
+    loadStreakSummary(),
   ])
   loading.value = false
+})
+
+onBeforeUnmount(() => {
+  if (celebrationTimer) clearTimeout(celebrationTimer)
+  if (streakTimer) clearTimeout(streakTimer)
+  if (streakRaf !== null) cancelAnimationFrame(streakRaf)
 })
 
 /** 从本地存储恢复当日提交统计（跨页面返回时保持「再提交」入口） */
@@ -531,6 +646,12 @@ function restoreSubmitStats() {
             </template>
           </span>
         </p>
+        <!-- 连续打卡连击条（多邻国式常驻提示） -->
+        <div v-if="currentStreak > 0" class="streak-strip">
+          <span class="streak-strip-flame">🔥</span>
+          <strong>已连续打卡 {{ currentStreak }} 天</strong>
+          <span class="streak-strip-best">最佳 {{ Math.max(bestStreak, currentStreak) }} 天</span>
+        </div>
         <p class="muted" style="font-size:12px;margin-top:2px">
           💡 完成每个小任务获得各自阳光值；<template v-if="checklistItems.some(i => i.isOptional)">带 ⭐ 的是可选加分项，不完成不影响审核；</template>所有必做小任务全部完成，额外奖励 +{{ ALL_DONE_BONUS_POINTS }} 阳光值
         </p>
@@ -718,9 +839,31 @@ function restoreSubmitStats() {
         class="celebrate-sun"
         :style="{ left: `${s.left}%`, animationDelay: `${s.delay}s`, fontSize: `${s.size}px` }"
       >☀️</span>
-      <div class="celebrate-score">
+      <div v-if="celebration.showScore" class="celebrate-score">
         <span class="celebrate-score-num">+{{ celebration.points }}</span>
         <span class="celebrate-score-label">阳光值</span>
+      </div>
+    </div>
+
+    <!-- ★ 连续打卡连击卡：数字滚动 + 火焰弹跳，仿多邻国 -->
+    <div v-if="streakShow.active" class="streak-celebrate-layer" @click="closeStreakCelebration">
+      <div class="streak-burst" aria-hidden="true">
+        <span v-for="i in 8" :key="i" class="streak-burst-ray" :style="{ transform: `rotate(${i * 45}deg)` }"></span>
+      </div>
+      <div class="streak-card" :class="{ 'is-record': streakShow.isNewRecord }">
+        <div class="streak-flame">🔥</div>
+        <p class="streak-label">{{ streakShow.isNewToday ? '连续打卡' : '今天已打卡' }}</p>
+        <div class="streak-number-row">
+          <span class="streak-number">{{ streakNumber }}</span>
+          <span class="streak-unit">天</span>
+        </div>
+        <p class="streak-milestone">{{ streakShow.milestone }}</p>
+        <p v-if="streakShow.isNewRecord" class="streak-record-tag">🏅 新的最佳纪录</p>
+        <div class="streak-reward">
+          <span class="streak-reward-coin">☀️</span>
+          <span class="streak-reward-num">+{{ streakShow.points }}</span>
+          <span class="streak-reward-text">阳光待家长审批</span>
+        </div>
       </div>
     </div>
   </Teleport>
@@ -1168,5 +1311,193 @@ function restoreSubmitStats() {
   30% { transform: translate(-50%, 0) scale(1); }
   78% { opacity: 1; }
   100% { transform: translate(-50%, -30px) scale(.92); opacity: 0; }
+}
+
+/* ── 连续打卡连击条 ── */
+.streak-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: linear-gradient(100deg, #fff8e1, #ffe9b0);
+  border: 1px solid #ffd54f;
+  color: #a15c00;
+  font-size: 14px;
+  font-weight: 800;
+  width: fit-content;
+}
+.streak-strip-flame {
+  font-size: 18px;
+  animation: flame-soft 1.6s ease-in-out infinite;
+}
+.streak-strip-best {
+  font-size: 12px;
+  font-weight: 700;
+  color: #b98b3d;
+  padding-left: 8px;
+  border-left: 1px solid rgba(190, 140, 40, .3);
+}
+@keyframes flame-soft {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
+
+/* ── 连击庆祝卡（多邻国式）── */
+.streak-celebrate-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  background: radial-gradient(circle at 50% 46%, rgba(255, 214, 102, .42), rgba(255, 250, 235, .12) 46%, rgba(255, 255, 255, 0) 72%);
+  animation: streak-layer-in .22s ease both;
+}
+@keyframes streak-layer-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.streak-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 268px;
+  padding: 26px 42px 22px;
+  border-radius: 34px;
+  background: linear-gradient(165deg, #fffef9 0%, #fff7dd 52%, #ffedb8 100%);
+  border: 3px solid #ffd54f;
+  box-shadow:
+    0 26px 60px rgba(255, 160, 0, .32),
+    0 0 0 10px rgba(255, 255, 255, .6),
+    inset 0 -6px 18px rgba(255, 214, 102, .35);
+  animation: streak-card-in .62s cubic-bezier(.2, 1.6, .45, 1) both;
+}
+.streak-card.is-record {
+  border-color: #ffb300;
+  box-shadow:
+    0 26px 68px rgba(255, 140, 0, .42),
+    0 0 0 10px rgba(255, 255, 255, .6),
+    inset 0 -6px 18px rgba(255, 193, 7, .45);
+}
+@keyframes streak-card-in {
+  0% { transform: scale(.55) translateY(24px); opacity: 0; }
+  60% { transform: scale(1.06) translateY(0); opacity: 1; }
+  100% { transform: scale(1) translateY(0); }
+}
+.streak-flame {
+  font-size: 52px;
+  line-height: 1;
+  filter: drop-shadow(0 8px 12px rgba(255, 120, 0, .35));
+  animation: flame-bounce 1.1s ease-in-out infinite;
+}
+@keyframes flame-bounce {
+  0%, 100% { transform: translateY(0) scale(1) rotate(-3deg); }
+  50% { transform: translateY(-9px) scale(1.1) rotate(3deg); }
+}
+.streak-label {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: #b26a00;
+}
+.streak-number-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.streak-number {
+  font-size: 86px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -3px;
+  color: #ff8f00;
+  text-shadow: 0 4px 0 #ffe082, 0 12px 22px rgba(255, 143, 0, .32);
+  font-variant-numeric: tabular-nums;
+  animation: streak-num-pop .5s cubic-bezier(.2, 1.7, .4, 1) both;
+}
+.streak-unit {
+  font-size: 26px;
+  font-weight: 900;
+  color: #d98200;
+}
+@keyframes streak-num-pop {
+  0% { transform: scale(.4); opacity: 0; }
+  70% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.streak-milestone {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #8a5a00;
+  text-align: center;
+  max-width: 250px;
+  line-height: 1.45;
+}
+.streak-record-tag {
+  margin: 8px 0 0;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: linear-gradient(100deg, #ffca28, #ffa726);
+  color: #5d3a00;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .5px;
+  box-shadow: 0 4px 12px rgba(255, 152, 0, .35);
+}
+.streak-reward {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(214, 160, 40, .45);
+  font-size: 13px;
+  font-weight: 800;
+  color: #a1670c;
+}
+.streak-reward-coin { font-size: 17px; }
+.streak-reward-num {
+  font-size: 20px;
+  font-weight: 900;
+  color: #ff9800;
+}
+.streak-reward-text { color: #b08442; font-weight: 700; }
+
+/* 背景光芒 */
+.streak-burst {
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  pointer-events: none;
+  animation: burst-spin 9s linear infinite;
+}
+.streak-burst-ray {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 250px;
+  margin-left: -1.5px;
+  transform-origin: 50% 0;
+  background: linear-gradient(to bottom, rgba(255, 213, 79, .55), rgba(255, 213, 79, 0));
+  border-radius: 999px;
+}
+@keyframes burst-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streak-flame,
+  .streak-burst,
+  .streak-strip-flame { animation: none; }
+  .streak-card,
+  .streak-number { animation-duration: .01ms; }
 }
 </style>

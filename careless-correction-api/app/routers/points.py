@@ -92,6 +92,12 @@ def award_points(
     if amount == 0:
         raise HTTPException(status_code=400, detail='数量不能为 0')
     target = resolve_target(current_user, child_id, db)
+    if amount < 0 and target.sunlight_points < abs(amount):
+        # 余额不足时直接报错，避免流水记 -50 而实际只扣了 20（账实不符）
+        raise HTTPException(
+            status_code=400,
+            detail=f'阳光值不足，当前 {target.sunlight_points}，无法扣除 {abs(amount)}',
+        )
     if amount > 0:
         pending = PendingSunlight(
             fk_users=target.pk_users,
@@ -106,7 +112,7 @@ def award_points(
             'pending': True,
             'newly_unlocked_badges': [],
         }
-    target.sunlight_points = max(0, target.sunlight_points + amount)
+    target.sunlight_points = target.sunlight_points + amount
     history = SunlightHistory(
         fk_users=target.pk_users,
         amount=amount,
@@ -577,25 +583,44 @@ def collect_sunlight(
         raise HTTPException(status_code=403, detail='无权收集该阳光')
     if record.collected:
         raise HTTPException(status_code=400, detail='该阳光已收集')
-    # 标记为已收集
-    record.collected = True
-    record.collected_at = datetime.now()
-    # 正式增加阳光值
-    current_user.sunlight_points += record.amount
+    amount = record.amount
+    reason = record.reason
+    # 用条件更新「抢占」这条待收集记录：并发/重复点击时只有一次能成功，
+    # 避免同一条阳光被收集两次导致阳光值翻倍
+    claimed = (
+        db.query(PendingSunlight)
+        .filter(
+            PendingSunlight.pk_pending_sunlight == sunlight_id,
+            PendingSunlight.collected == False,
+        )
+        .update(
+            {PendingSunlight.collected: True, PendingSunlight.collected_at: datetime.now()},
+            synchronize_session=False,
+        )
+    )
+    if not claimed:
+        db.rollback()
+        raise HTTPException(status_code=400, detail='该阳光已收集')
+    # 正式增加阳光值（用 SQL 表达式原子自增，避免并发覆盖）
+    db.query(User).filter(User.pk_users == current_user.pk_users).update(
+        {User.sunlight_points: User.sunlight_points + amount},
+        synchronize_session=False,
+    )
     # 记录阳光值变动历史
     history = SunlightHistory(
         fk_users=current_user.pk_users,
-        amount=record.amount,
-        reason=record.reason,
+        amount=amount,
+        reason=reason,
         type='earn',
     )
     db.add(history)
     db.commit()
+    db.refresh(current_user)
     # Check badge auto-unlock after collecting sunlight
     newly_unlocked = auto_unlock_badges(current_user, db)
     return {
         'success': True,
-        'amount': record.amount,
+        'amount': amount,
         'balance': current_user.sunlight_points,
         'newly_unlocked_badges': newly_unlocked,
     }

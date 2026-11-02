@@ -30,6 +30,11 @@ const routes = [
     component: () => import('../views/child/HabitPrintableCenter.vue'),
   },
   {
+    path: '/checkin-stats',
+    name: 'CheckinStats',
+    component: () => import('../views/child/CheckinStats.vue'),
+  },
+  {
     path: '/mistake',
     name: 'MistakeBook',
     component: () => import('../views/child/DiagnosticMistakeBook.vue'),

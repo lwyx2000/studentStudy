@@ -549,7 +549,47 @@ export const api = {
       if (data.allDoneBonus) params.set('all_done_bonus', String(data.allDoneBonus))
       if (data.habitPoints) params.set('habit_points', String(data.habitPoints))
       if (data.completedTasks?.length) params.set('completed_tasks', JSON.stringify(data.completedTasks))
-      return request<any>(`/checkins/?${params}`, { method: 'POST' })
+      return request<{
+        checkin: any
+        updated: boolean
+        streak?: {
+          days: number
+          approvedDays: number
+          bestDays: number
+          checkedToday: boolean
+          isNewToday: boolean
+          todayDate: string
+        }
+      }>(`/checkins/?${params}`, { method: 'POST' })
+    },
+    getStats: (childId?: string, days = 92) => {
+      const params = new URLSearchParams({ days: String(days) })
+      if (childId) params.set('child_id', childId)
+      return request<{
+        today: string
+        todayStatus: 'approved' | 'pending' | 'rejected' | 'none'
+        streakDays: number
+        approvedStreakDays: number
+        bestStreakDays: number
+        totalDays: number
+        submittedDays: number
+        monthDays: number
+        monthSubmittedDays: number
+        monthSunlight: number
+        totalSunlight: number
+        collectedSunlight: number
+        uncollectedSunlight: number
+        avgSunlight: number
+        daily: {
+          date: string
+          status: 'approved' | 'pending' | 'rejected' | 'none'
+          points: number
+          collected: boolean
+          taskCount: number
+          habitStepCount: number
+        }[]
+        monthly: { month: string; days: number; sunlight: number }[]
+      }>(`/checkins/stats?${params}`)
     },
     getMine: (limit = 50, offset = 0) =>
       request<{ checkins: any[]; total: number }>(`/checkins/mine?limit=${limit}&offset=${offset}`),

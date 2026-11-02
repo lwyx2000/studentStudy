@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -33,34 +33,90 @@ def _normalize_check_date(raw: str) -> str | None:
     return d.isoformat() if d else None
 
 
-def _update_streak_days(child: User, db: Session, check_date: str):
-    """根据打卡日期更新连续打卡天数（计入本次通过的打卡）。
-
-    直接用 SQL 拉取该孩子所有已通过打卡的去重日期，避免 limit 截断导致长期使用后 streak 不准。
-    """
-    current = _parse_check_date(check_date) or datetime.now().date()
-
-    date_strs = (
+def _approved_dates(child_id: int, db: Session) -> set[date]:
+    """该孩子所有已通过审批的打卡日期（去重，已归一化）。"""
+    rows = (
         db.query(CheckIn.check_date)
-        .filter(
-            CheckIn.fk_users == child.pk_users,
-            CheckIn.status == 'approved',
-        )
+        .filter(CheckIn.fk_users == child_id, CheckIn.status == 'approved')
         .distinct()
         .all()
     )
-    dates = {_parse_check_date(s[0]) for s in date_strs}
-    dates.discard(None)
-    # 显式把本次打卡日期加入集合，避免依赖 autoflush 行为
-    dates.add(current)
+    dates: set[date] = set()
+    for (raw,) in rows:
+        d = _parse_check_date(raw)
+        if d:
+            dates.add(d)
+    return dates
 
-    # 从 current 向前数连续天数
+
+def _calc_streak(dates: set[date], anchor: date) -> int:
+    """从 anchor 往前数连续天数。
+
+    若 anchor 当天还没有已通过打卡，则从 anchor-1 开始数（今天尚未打卡不清零连击，
+    与常见打卡产品一致）。
+    """
+    cursor = anchor
+    if cursor not in dates:
+        cursor -= timedelta(days=1)
     streak = 0
-    cursor = current
     while cursor in dates:
         streak += 1
         cursor -= timedelta(days=1)
-    child.streak_days = streak
+    return streak
+
+
+def _calc_best_streak(dates: set[date]) -> int:
+    """历史最长连续打卡天数。"""
+    if not dates:
+        return 0
+    best = cur = 1
+    prev: date | None = None
+    for d in sorted(dates):
+        if prev is None:
+            cur = 1
+        elif (d - prev).days == 1:
+            cur += 1
+        else:
+            cur = 1
+        best = max(best, cur)
+        prev = d
+    return best
+
+
+def _has_checked_today(child_id: int, db: Session) -> bool:
+    """今天是否已经提交过打卡（待审批也算，已驳回不算）。"""
+    today = datetime.now().date()
+    rows = (
+        db.query(CheckIn.check_date)
+        .filter(
+            CheckIn.fk_users == child_id,
+            CheckIn.status.in_(['pending', 'approved']),
+        )
+        .all()
+    )
+    return any(_parse_check_date(raw) == today for (raw,) in rows)
+
+
+def _streak_snapshot(child: User, db: Session, include_today_pending: bool = True):
+    """返回 (当前连续天数, 历史最佳连续天数, 含今日待审批的展示天数)。
+
+    streak_days 以「今天/昨天」为锚点动态计算，因此补打卡历史日期不会把已有连击覆盖掉。
+    """
+    approved = _approved_dates(child.pk_users, db)
+    today = datetime.now().date()
+    base = _calc_streak(approved, today)
+    display = base
+    if include_today_pending and today not in approved and _has_checked_today(child.pk_users, db):
+        display = base + 1
+    best = max(_calc_best_streak(approved), display)
+    return base, best, display
+
+
+def _refresh_streak_days(child: User, db: Session) -> int:
+    """刷新并回写连续打卡天数（仅统计已通过审批的记录）。"""
+    base, _best, _display = _streak_snapshot(child, db, include_today_pending=False)
+    child.streak_days = base
+    return base
 
 
 def _sanitize_completed_tasks_snapshot(raw: str | None) -> str | None:
@@ -140,6 +196,9 @@ def submit_checkin(
     normalized = _normalize_check_date(check_date)
     if not normalized:
         raise HTTPException(status_code=400, detail='打卡日期格式无效')
+    # 不允许给未来日期打卡（避免提前刷阳光、污染连续天数统计）
+    if _parse_check_date(normalized) > datetime.now().date():
+        raise HTTPException(status_code=400, detail='不能给未来日期打卡')
 
     # 服务端兜底校验：积分不可为负，总分不得超过该孩子当日理论可得上限
     # （前端计算正确时永远不会触发，仅防御改包/伪造请求刷阳光）
@@ -175,11 +234,23 @@ def submit_checkin(
 
     # 支持同日多次提交：如果当天已有未审批通过的打卡，用新提交覆盖旧记录（保留 id 与 created_at，仅更新积分与快照）
     # 已通过(approved)的记录不允许重复提交，避免同一天重复获得阳光
-    existing = db.query(CheckIn).filter(
-        CheckIn.fk_users == current_user.pk_users,
-        CheckIn.check_date == normalized,
-        CheckIn.status.in_(['pending', 'rejected']),
-    ).order_by(CheckIn.pk_check_ins.desc()).first()
+    same_date = (
+        db.query(CheckIn)
+        .filter(CheckIn.fk_users == current_user.pk_users, CheckIn.check_date == normalized)
+        .order_by(CheckIn.pk_check_ins.desc())
+        .all()
+    )
+    if any(r.status == 'approved' for r in same_date):
+        raise HTTPException(status_code=400, detail='该日期打卡已审批通过，无需重复提交')
+
+    existing = next((r for r in same_date if r.status in ('pending', 'rejected')), None)
+    # 清理同日重复待审批记录（并发双击 / 旧数据），否则家长会审批两条、重复发放阳光
+    for dup in same_date:
+        if existing is not None and dup.pk_check_ins == existing.pk_check_ins:
+            continue
+        if dup.status in ('pending', 'rejected') and not dup.pending_sunlight_records:
+            db.delete(dup)
+
     if existing:
         if existing.status == 'rejected':
             existing.status = 'pending'
@@ -196,16 +267,19 @@ def submit_checkin(
         existing.approved_at = None
         db.commit()
         db.refresh(existing)
-        return {'checkin': existing, 'updated': True}
-
-    # 若同日已有已通过(approved)的打卡，不允许重复提交，避免重复获得阳光
-    already_approved = db.query(CheckIn).filter(
-        CheckIn.fk_users == current_user.pk_users,
-        CheckIn.check_date == normalized,
-        CheckIn.status == 'approved',
-    ).first()
-    if already_approved:
-        raise HTTPException(status_code=400, detail='该日期打卡已审批通过，无需重复提交')
+        base, best, display = _streak_snapshot(current_user, db)
+        return {
+            'checkin': existing,
+            'updated': True,
+            'streak': {
+                'days': display,
+                'approvedDays': base,
+                'bestDays': best,
+                'checkedToday': _has_checked_today(current_user.pk_users, db),
+                'isNewToday': False,
+                'todayDate': normalized,
+            },
+        }
 
     record = CheckIn(
         fk_users=current_user.pk_users,
@@ -223,7 +297,138 @@ def submit_checkin(
     db.add(record)
     db.commit()
     db.refresh(record)
-    return {'checkin': record, 'updated': False}
+    base, best, display = _streak_snapshot(current_user, db)
+    return {
+        'checkin': record,
+        'updated': False,
+        'streak': {
+            'days': display,
+            'approvedDays': base,
+            'bestDays': best,
+            'checkedToday': _has_checked_today(current_user.pk_users, db),
+            'isNewToday': _parse_check_date(normalized) == datetime.now().date(),
+            'todayDate': normalized,
+        },
+    }
+
+
+@router.get('/stats')
+def get_checkin_stats(
+    child_id: int | None = None,
+    days: int = 92,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """打卡统计：连续天数、累计天数、每日获得阳光、日历明细、月度汇总。
+
+    child_id 为空时统计自己；家长可传孩子 id 查看孩子数据。
+    """
+    if child_id is None:
+        target = current_user
+    else:
+        if current_user.role != 'parent':
+            raise HTTPException(status_code=403, detail='无权查看该孩子数据')
+        target = db.query(User).filter(
+            User.pk_users == child_id,
+            User.fk_users_parent == current_user.pk_users,
+        ).first()
+        if not target:
+            raise HTTPException(status_code=404, detail='孩子账号不存在')
+
+    days = max(7, min(days, 365))
+    today = datetime.now().date()
+
+    rows = db.query(CheckIn).filter(CheckIn.fk_users == target.pk_users).all()
+    pending_rows = (
+        db.query(PendingSunlight)
+        .filter(PendingSunlight.fk_users == target.pk_users)
+        .all()
+    )
+    pending_by_checkin = {
+        p.fk_check_ins: p for p in pending_rows if p.fk_check_ins is not None
+    }
+
+    # 同一天可能有多条记录，按 approved > pending > rejected 取优先级最高的那条
+    rank = {'approved': 3, 'pending': 2, 'rejected': 1}
+    by_date: dict[date, CheckIn] = {}
+    for r in rows:
+        d = _parse_check_date(r.check_date)
+        if not d:
+            continue
+        cur = by_date.get(d)
+        if cur is None or rank.get(r.status, 0) > rank.get(cur.status, 0):
+            by_date[d] = r
+
+    approved_dates = {d for d, r in by_date.items() if r.status == 'approved'}
+    base_streak, best_streak, display_streak = _streak_snapshot(target, db)
+
+    start = today - timedelta(days=days - 1)
+    daily = []
+    for i in range(days):
+        d = start + timedelta(days=i)
+        r = by_date.get(d)
+        status = r.status if r else 'none'
+        points = r.total_points if (r and r.status == 'approved') else 0
+        p = pending_by_checkin.get(r.pk_check_ins) if r else None
+        daily.append({
+            'date': d.isoformat(),
+            'status': status,
+            'points': points,
+            'collected': bool(p.collected) if p else False,
+            'taskCount': (len(_load_snapshot(r.completed_tasks_snapshot)) or r.task_count) if r else 0,
+            'habitStepCount': r.habit_step_count if r else 0,
+        })
+
+    # 月度汇总（近 6 个月，含没有打卡的月份，前端可直接画趋势）
+    monthly_map: dict[str, dict] = {}
+    cursor_month = today.replace(day=1)
+    month_keys: list[str] = []
+    for _ in range(6):
+        month_keys.append(cursor_month.strftime('%Y-%m'))
+        cursor_month = (cursor_month - timedelta(days=1)).replace(day=1)
+    for key in reversed(month_keys):
+        monthly_map[key] = {'month': key, 'days': 0, 'sunlight': 0}
+    for d, r in by_date.items():
+        key = d.strftime('%Y-%m')
+        if key not in monthly_map:
+            continue
+        monthly_map[key]['days'] += 1 if r.status in ('approved', 'pending') else 0
+        if r.status == 'approved':
+            monthly_map[key]['sunlight'] += r.total_points or 0
+    monthly = [monthly_map[k] for k in sorted(monthly_map.keys())]
+
+    month_prefix = today.strftime('%Y-%m')
+    total_sunlight = sum(r.total_points or 0 for r in by_date.values() if r.status == 'approved')
+    month_days = sum(1 for d, r in by_date.items() if r.status == 'approved' and d.strftime('%Y-%m') == month_prefix)
+    month_submitted_days = sum(
+        1 for d, r in by_date.items()
+        if r.status in ('approved', 'pending') and d.strftime('%Y-%m') == month_prefix
+    )
+    month_sunlight = sum(
+        r.total_points or 0 for d, r in by_date.items()
+        if r.status == 'approved' and d.strftime('%Y-%m') == month_prefix
+    )
+    collected_sunlight = sum(p.amount for p in pending_by_checkin.values() if p.collected)
+    uncollected_sunlight = sum(p.amount for p in pending_by_checkin.values() if not p.collected)
+
+    return {
+        'today': today.isoformat(),
+        'todayStatus': by_date[today].status if today in by_date else 'none',
+        'streakDays': display_streak,
+        'approvedStreakDays': base_streak,
+        'bestStreakDays': best_streak,
+        'totalDays': len(approved_dates),
+        'submittedDays': len(by_date),
+        'monthDays': month_days,
+        'monthSubmittedDays': month_submitted_days,
+        'monthSunlight': month_sunlight,
+        'totalSunlight': total_sunlight,
+        'collectedSunlight': collected_sunlight,
+        'uncollectedSunlight': uncollected_sunlight,
+        'avgSunlight': round(total_sunlight / len(approved_dates), 1) if approved_dates else 0,
+        'daily': daily,
+        'monthly': monthly,
+    }
 
 
 @router.get('/mine')
@@ -303,16 +508,17 @@ def approve_checkin(
     # 不再直接增加 sunlight_points，而是生成「待收集阳光」记录
     # 孩子需在阳光树页面点击收集后才正式变为阳光值
     if record.total_points > 0:
-        # 重复审批（驳回后重新通过）时避免重复生成待收集阳光
-        already_pending = (
+        # 该打卡已有待收集阳光（含已收集）时不再重复生成，避免重复发放
+        already_created = (
             db.query(PendingSunlight)
-            .filter(
-                PendingSunlight.fk_check_ins == record.pk_check_ins,
-                PendingSunlight.collected == False,
-            )
+            .filter(PendingSunlight.fk_check_ins == record.pk_check_ins)
             .first()
         )
-        if not already_pending:
+        if already_created:
+            # 金额以本次审批后的分值为准（驳回后重新提交过则同步更新未收集的那条）
+            if not already_created.collected and already_created.amount != record.total_points:
+                already_created.amount = record.total_points
+        else:
             pending = PendingSunlight(
                 fk_users=child.pk_users,
                 amount=record.total_points,
@@ -321,11 +527,14 @@ def approve_checkin(
                 collected=False,
             )
             db.add(pending)
-    # 更新连续打卡天数
-    _update_streak_days(child, db, record.check_date)
+    # 更新连续打卡天数：以今天为锚点重算，不受补打卡历史日期影响
+    db.flush()
+    _refresh_streak_days(child, db)
     db.commit()
+    db.refresh(child)
     # Auto-unlock badges after checkin approval
     newly_unlocked = auto_unlock_badges(child, db)
+    _base, _best, display_days = _streak_snapshot(child, db)
     return {
         'success': True,
         'childName': child.name,
@@ -333,6 +542,7 @@ def approve_checkin(
         'pendingSunlight': True,
         'balance': child.sunlight_points,
         'streakDays': child.streak_days,
+        'displayStreakDays': display_days,
         'newly_unlocked_badges': newly_unlocked,
     }
 

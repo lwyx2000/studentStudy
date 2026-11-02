@@ -104,6 +104,7 @@ onBeforeUnmount(() => {
 const childNavItems = [
   { name: 'Dashboard', path: '/dashboard', icon: '🐾', label: '协同仪表盘' },
   { name: 'HabitCenter', path: '/habit', icon: '✅', label: '每日打卡' },
+  { name: 'CheckinStats', path: '/checkin-stats', icon: '📊', label: '打卡统计' },
   { name: 'SunshineTree', path: '/tree', icon: '🌳', label: '阳光树' },
   { name: 'MistakeBook', path: '/mistake', icon: '📚', label: '我的题库' },
   { name: 'ItemTracker', path: '/tracker', icon: '🎒', label: '物品管理' },

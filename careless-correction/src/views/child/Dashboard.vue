@@ -20,7 +20,11 @@ interface ChecklistRecord {
 const records = ref<ChecklistRecord[]>([])
 const loading = ref(true)
 
-const todayStr = new Date().toLocaleDateString('zh-CN')
+/** 本地 ISO 日期（YYYY-MM-DD），与后端 checkDate 格式一致 */
+function toISODate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const todayStr = toISODate(new Date())
 
 async function loadHistory() {
   loading.value = true
@@ -54,6 +58,12 @@ const hasTodayRecord = computed(() =>
   records.value.some(r => r.date === todayStr)
 )
 
+// 累计打卡按日期去重统计，且只把「已通过」算作真正完成的天数
+const totalDays = computed(() => new Set(records.value.map(r => r.date)).size)
+const approvedDays = computed(() =>
+  new Set(records.value.filter(r => r.status === 'approved').map(r => r.date)).size
+)
+
 function goTodayChecklist() {
   router.push('/habit')
 }
@@ -64,11 +74,9 @@ function editRecord(date: string) {
 
 function formatDate(date: string): string {
   const isToday = date === todayStr
-  const isYesterday = (() => {
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-    return date === yesterday.toLocaleDateString('zh-CN')
-  })()
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const isYesterday = date === toISODate(yesterday)
   if (isToday) return '今天'
   if (isYesterday) return '昨天'
   return date
@@ -120,6 +128,9 @@ onMounted(() => {
         <button class="btn secondary" @click="goTodayChecklist">
           {{ hasTodayRecord ? '查看今日打卡' : '去今日打卡' }}
         </button>
+        <button class="btn ghost" style="margin-left:8px" @click="router.push('/checkin-stats')">
+          📊 打卡统计
+        </button>
       </div>
       <div class="panel">
         <div class="card-title">
@@ -127,12 +138,15 @@ onMounted(() => {
           <span class="tag">☀️ {{ userStore.sunlightPoints }}</span>
         </div>
         <div class="kpi">
-          <strong>{{ records.length }}</strong>
+          <strong>{{ approvedDays }}</strong>
           <span>累计打卡天数</span>
         </div>
         <p class="lead" style="margin-top:8px">
-          已提交 {{ records.filter(r => r.submitted).length }} 天
+          已提交 {{ totalDays }} 天 · 已通过 {{ approvedDays }} 天
         </p>
+        <button class="btn ghost" style="margin-top:12px;width:100%" @click="router.push('/checkin-stats')">
+          查看打卡日历与每日阳光 →
+        </button>
       </div>
     </section>
 
