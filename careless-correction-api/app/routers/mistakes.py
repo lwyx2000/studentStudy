@@ -80,6 +80,16 @@ def create_mistake(
     db: Session = Depends(get_db),
 ):
     target = resolve_target(current_user, child_id, db)
+    subject = (subject or '').strip()[:30]
+    if not subject:
+        raise HTTPException(status_code=400, detail='科目不能为空')
+    image_url = (image_url or '').strip()
+    # 只接受本服务上传接口返回的路径或 http(s) 地址，避免把任意字符串塞进库
+    # （SQLite 不强制 VARCHAR 长度，超长或非法 URL 会原样存入并在前端渲染）
+    if not (image_url.startswith('/uploads/') or image_url.startswith('http://') or image_url.startswith('https://')):
+        raise HTTPException(status_code=400, detail='图片地址无效，请先调用上传接口')
+    if len(image_url) > 255:
+        raise HTTPException(status_code=400, detail='图片地址过长')
     record = MistakeRecord(
         fk_users=target.pk_users,
         subject=subject,
@@ -188,6 +198,9 @@ def review_mistake(
             raise HTTPException(status_code=403, detail='无权操作')
 
     now = datetime.now()
+    # 信心等级限制在 1-5（默认视为「不确定」，按未掌握处理）
+    if confidence_level is not None:
+        confidence_level = max(1, min(5, int(confidence_level)))
     review_count = record.review_count + 1
 
     # 判断是否已掌握

@@ -225,7 +225,13 @@ def create_reward(
     # 兑换价必须为正：负数会让「扣减」变成记一笔正向流水，把历史记录弄乱
     if cost < 1 or cost > 9999:
         raise HTTPException(status_code=400, detail='兑换所需阳光值需在 1-9999 之间')
-    item = RewardItem(fk_users=target.pk_users, name=name, cost=cost, description=description, icon=icon)
+    name = (name or '').strip()[:100]
+    if not name:
+        raise HTTPException(status_code=400, detail='物品名称不能为空')
+    item = RewardItem(
+        fk_users=target.pk_users, name=name, cost=cost,
+        description=(description or None), icon=(icon[:20] if icon else None),
+    )
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -249,6 +255,9 @@ def update_reward(
     if not item or not _can_manage_reward(item, current_user, db):
         raise HTTPException(status_code=404, detail='物品不存在')
     if name is not None:
+        name = name.strip()[:100]
+        if not name:
+            raise HTTPException(status_code=400, detail='物品名称不能为空')
         item.name = name
     if description is not None:
         item.description = description
@@ -257,7 +266,7 @@ def update_reward(
             raise HTTPException(status_code=400, detail='兑换所需阳光值需在 1-9999 之间')
         item.cost = cost
     if icon is not None:
-        item.icon = icon
+        item.icon = icon[:20]
     if active is not None:
         item.active = active
     db.commit()
@@ -548,14 +557,21 @@ def approve_apple_redemption(
     if hist:
         hist.reason = f'兑换 {req.count} 元（家长已审核）'
     else:
-        # 兼容旧数据（提交时未预扣的历史申请）：通过时才扣减
-        if child.apples < req.count:
+        # 兼容旧数据（提交时未预扣的历史申请）：通过时才扣减。
+        # 用条件 UPDATE 原子扣减，避免「先读余额再减」在并发下扣成负数
+        deducted = (
+            db.query(User)
+            .filter(User.pk_users == child.pk_users, User.apples >= req.count)
+            .update({User.apples: User.apples - req.count}, synchronize_session=False)
+        )
+        if not deducted:
+            db.rollback()
             db.query(AppleRedemptionRequest).filter(
                 AppleRedemptionRequest.pk_apple_redemption_requests == request_id
             ).update({AppleRedemptionRequest.status: 'rejected'}, synchronize_session=False)
             db.commit()
             raise HTTPException(status_code=400, detail='孩子苹果数量不足，申请已自动驳回')
-        child.apples -= req.count
+        db.expire(child)
         db.add(AppleHistory(
             fk_users=child.pk_users,
             amount=-req.count,

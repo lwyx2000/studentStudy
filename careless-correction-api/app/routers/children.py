@@ -102,6 +102,10 @@ def add_child(
     初始密码随机生成并只在本次响应返回（家长需转告孩子），
     避免所有孩子共用同一个公开默认密码。
     """
+    name = (name or '').strip()
+    if not 1 <= len(name) <= 30:
+        raise HTTPException(status_code=400, detail='孩子姓名长度需为 1-30 个字符')
+    # 去重校验必须在 strip 之后：否则「 小明 」能绕过同名检查
     existing = db.query(User).filter(
         User.name == name,
         User.fk_users_parent == current_user.pk_users,
@@ -109,9 +113,6 @@ def add_child(
     ).first()
     if existing:
         raise HTTPException(status_code=409, detail='已存在同名孩子')
-    name = (name or '').strip()
-    if not 1 <= len(name) <= 30:
-        raise HTTPException(status_code=400, detail='孩子姓名长度需为 1-30 个字符')
     initial_password = _generate_child_password()
     child = User(
         name=name,

@@ -70,6 +70,13 @@ def ctx():
             )
         ).delete(synchronize_session=False)
         s.query(HabitSOP).filter(HabitSOP.fk_users == ids['child']).delete(synchronize_session=False)
+        # 复习记录引用错题（无级联），必须先删复习记录再删错题
+        from app.models import MistakeReview
+        s.query(MistakeReview).filter(
+            MistakeReview.fk_mistake_records.in_(
+                s.query(MistakeRecord.pk_mistake_records).filter(MistakeRecord.fk_users == ids['child'])
+            )
+        ).delete(synchronize_session=False)
         s.query(MistakeRecord).filter(MistakeRecord.fk_users == ids['child']).delete(synchronize_session=False)
         s.query(LlmConfig).filter(LlmConfig.fk_users == ids['parent']).delete(synchronize_session=False)
         s.commit()
@@ -220,3 +227,51 @@ def test_subtask_negative_points_rejected(ctx):
                     params={'title': '异常分值', 'reward_points': -5},
                     headers=ctx.parent_headers)
     assert resp.status_code == 400
+
+
+# ── 第三轮补充：输入校验加固 ────────────────────────────────────────────
+
+def test_mistake_invalid_image_url_rejected(ctx):
+    """image_url 只接受本服务上传路径或 http(s) 地址，不能塞任意字符串"""
+    resp = ctx.post('/api/v1/mistakes/', params={'subject': '数学', 'image_url': 'javascript:alert(1)'})
+    assert resp.status_code == 400
+    resp = ctx.post('/api/v1/mistakes/', params={'subject': '数学', 'image_url': 'x' * 300})
+    assert resp.status_code == 400
+    resp = ctx.post('/api/v1/mistakes/', params={'subject': '数学', 'image_url': '/uploads/mistake_abc.png'})
+    assert resp.status_code == 201
+    # 超长科目被截断而不是报错
+    resp = ctx.post('/api/v1/mistakes/', params={'subject': '长' * 60, 'image_url': '/uploads/mistake_abc.png'})
+    assert resp.status_code == 201
+
+
+def test_mistake_review_confidence_clamped(ctx):
+    """信心等级越界（如 99）应收敛到 1-5 而不是 500 或原样入库"""
+    with SASession(engine) as s:
+        rec = MistakeRecord(fk_users=ctx.child_id, subject='语文', image_url='/uploads/x.png')
+        s.add(rec)
+        s.commit()
+        rec_id = rec.pk_mistake_records
+    resp = ctx.post(f'/api/v1/mistakes/{rec_id}/review',
+                    params={'can_resolve': 'false', 'confidence_level': 99})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['review']['confidence_level'] == 5
+
+
+def test_reward_name_validated(ctx):
+    """空名称拒绝，超长名称截断到 100"""
+    resp = ctx.post('/api/v1/points/rewards', params={'name': '   ', 'cost': 10})
+    assert resp.status_code == 400
+    resp = ctx.post('/api/v1/points/rewards', params={'name': '名' * 300, 'cost': 10})
+    assert resp.status_code == 201
+    assert len(resp.json()['reward']['name']) <= 100
+
+
+def test_add_child_duplicate_after_strip(ctx):
+    """带空格的同名孩子也应命中去重校验"""
+    resp = ctx.post('/api/v1/children/', params={'name': '去重孩子'},
+                    headers=ctx.parent_headers)
+    assert resp.status_code == 201
+    resp = ctx.post('/api/v1/children/', params={'name': ' 去重孩子 '},
+                    headers=ctx.parent_headers)
+    assert resp.status_code == 409
