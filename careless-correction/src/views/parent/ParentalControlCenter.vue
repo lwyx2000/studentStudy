@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onPageRefresh } from '../../utils/refreshBus'
 import { api, normalizeTask } from '../../utils/api'
 import { useBadgeStore, useChildSelectStore, useMistakeStore, useParentStore, useTaskStore, refreshPendingCheckinCount, pendingCheckinCount } from '../../stores'
 import ChildSelector from '../../components/ChildSelector.vue'
@@ -300,6 +301,12 @@ async function rejectRedemption(r: AppleRedemptionRequestInfo) {
   }
 }
 
+const offRefresh = onPageRefresh(() => {
+  loadAllCheckins()
+  loadData()
+  loadRedemptionRequests()
+})
+
 onMounted(() => {
   loadAllCheckins()
   loadData()
@@ -311,6 +318,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  offRefresh()
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('resize', onResize)

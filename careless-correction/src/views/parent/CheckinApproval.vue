@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onPageRefresh } from '../../utils/refreshBus'
 import { api } from '../../utils/api'
 import { refreshPendingCheckinCount, useBadgeStore, useChildSelectStore } from '../../stores'
 import PointsBreakdown from '../../components/PointsBreakdown.vue'
@@ -179,9 +180,11 @@ async function approveAll() {
   }
 }
 
+const offRefresh = onPageRefresh(loadData)
 onMounted(() => {
   loadData()
 })
+onBeforeUnmount(() => offRefresh())
 
 function formatTime(iso?: string): string {
   if (!iso) return '—'

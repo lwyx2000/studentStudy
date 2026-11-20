@@ -18,16 +18,20 @@ const confirmPassword = ref('')
 const inviteCode = ref('')
 const error = ref('')
 const loading = ref(false)
-// 记住账号（只存用户名，不存密码）
+// 记住账号密码（用于自动登录）
 const savePwd = ref(false)
+const autoLogging = ref(false)
 
-// 进入登录页时回填已记住的账号名；密码不再本地保存，需用户输入。
-// （已登录用户由 App 启动时的 token 校验直接进入主页，不依赖这里的自动登录）
+// 进入登录页时回填已记住的账号密码；凭据未过期则静默自动登录，不打扰用户
+// （已登录用户由 App 启动时的 token 校验直接进入主页，不会走到这里）
 onMounted(() => {
   const cred = loadCredentials()
   if (cred) {
     name.value = cred.username
+    password.value = cred.password
     savePwd.value = true
+    autoLogging.value = true
+    submit().finally(() => { autoLogging.value = false })
   }
 })
 
@@ -66,9 +70,9 @@ async function submit() {
     userStore.setProfile(normalizeUser(res.user))
     userStore.completeOnboarding()
 
-    // 勾选了「记住账号」则存下用户名；取消勾选则清除
+    // 勾选了「记住账号」则存下账号密码用于自动登录；取消勾选则清除
     if (mode.value === 'login') {
-      if (savePwd.value) saveCredentials(name.value.trim())
+      if (savePwd.value) saveCredentials(name.value.trim(), password.value)
       else clearCredentials()
     }
 
@@ -164,6 +168,13 @@ const particlesOptions: ISourceOptions = {
           <p class="subtitle">家长专属管理平台</p>
         </div>
 
+        <!-- 自动登录中：隐藏表单，避免用户误改自动填入的凭据 -->
+        <div v-if="autoLogging" class="auto-login-hint">
+          正在自动登录
+          <span class="dot-loader"><i /><i /><i /></span>
+        </div>
+
+        <template v-if="!autoLogging">
         <!-- tab 切换 -->
         <div class="tab-bar">
           <button :class="{ active: mode === 'login' }" @click="mode = 'login'; error = ''">登录</button>
@@ -208,7 +219,7 @@ const particlesOptions: ISourceOptions = {
 
             <label v-if="mode === 'login'" class="save-pwd-row">
               <input v-model="savePwd" type="checkbox" />
-              <span>💾 记住账号（仅保存用户名，密码不落盘）</span>
+              <span>💾 记住账号密码（下次自动登录）</span>
             </label>
 
             <Transition name="err">
@@ -228,6 +239,7 @@ const particlesOptions: ISourceOptions = {
             <p v-if="mode === 'register'" class="hint">注册后默认为家长账号，可在控制台添加孩子。</p>
           </div>
         </Transition>
+        </template>
 
       </div>
     </Transition>

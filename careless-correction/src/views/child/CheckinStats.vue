@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../utils/api'
+import { onPageRefresh } from '../../utils/refreshBus'
 
 interface DayCell {
   date: string
@@ -51,7 +52,9 @@ async function loadStats() {
   loading.value = false
 }
 
+const offRefresh = onPageRefresh(loadStats)
 onMounted(loadStats)
+onBeforeUnmount(() => offRefresh())
 watch(rangeDays, loadStats)
 
 const WEEK_LABELS = ['一', '二', '三', '四', '五', '六', '日']

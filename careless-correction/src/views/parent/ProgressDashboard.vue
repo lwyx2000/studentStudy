@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onPageRefresh } from '../../utils/refreshBus'
 import { categoryLabels } from '../../utils/constants'
 import { useChildSelectStore, useGrowthStore, useMistakeStore, useParentStore, useUserStore } from '../../stores'
 import { api, normalizeTask } from '../../utils/api'
@@ -62,9 +63,11 @@ watch(() => childSelectStore.selectedChildId, async () => {
   await loadData()
 })
 
+const offRefresh = onPageRefresh(loadData)
 onMounted(() => {
   loadData()
 })
+onBeforeUnmount(() => offRefresh())
 
 // ── 任务数据 ──
 const allTasks = computed(() => parentStore.parentTaskTemplates)

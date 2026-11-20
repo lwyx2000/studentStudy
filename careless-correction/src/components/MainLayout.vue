@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useUserStore, pendingCheckinCount, refreshPendingCheckinCount } from '../stores'
+import PullToRefresh from './PullToRefresh.vue'
+import {
+  useUserStore, useTaskStore, useMistakeStore, useGrowthStore, useBadgeStore,
+  useParentStore, useChildSelectStore, pendingCheckinCount, refreshPendingCheckinCount,
+} from '../stores'
 import { api, clearAuthToken, setAuthToken } from '../utils/api'
 import { gradeLabel } from '../utils/constants'
+import { emitPageRefresh } from '../utils/refreshBus'
 
 const router = useRouter()
 const route = useRoute()
@@ -88,6 +93,21 @@ async function changePassword() {
   } finally {
     changingPassword.value = false
   }
+}
+
+// ── 下拉刷新：重新拉取所有 store 数据，并通知有本地加载逻辑的页面刷新 ──
+async function handleRefresh() {
+  const childId = useChildSelectStore().selectedChildId ?? undefined
+  await Promise.allSettled([
+    useUserStore().fetchFromApi(childId),
+    useTaskStore().fetchFromApi(childId),
+    useMistakeStore().fetchFromApi(childId),
+    useGrowthStore().fetchFromApi(childId),
+    useBadgeStore().fetchFromApi(childId),
+    useParentStore().fetchFromApi(childId),
+    refreshPendingCheckinCount(),
+  ])
+  emitPageRefresh()
 }
 
 // onMounted 时初始刷新徽章
@@ -203,7 +223,9 @@ function logout() {
     </aside>
 
     <main class="content">
-      <router-view />
+      <PullToRefresh @refresh="handleRefresh">
+        <router-view />
+      </PullToRefresh>
     </main>
 
     <!-- 修改密码弹窗 -->

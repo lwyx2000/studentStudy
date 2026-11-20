@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { onPageRefresh } from '../../utils/refreshBus'
 import { getMistakeCategoryIcon, getMistakeCategoryLabel } from '../../utils/constants'
 import { useMistakeStore, useUserStore } from '../../stores'
 import { api } from '../../utils/api'
@@ -112,9 +113,11 @@ function removeMistake(id: string) {
   mistakeStore.removeRecord(id)
 }
 
+const offRefresh = onPageRefresh(loadHistory)
 onMounted(() => {
   loadHistory()
 })
+onBeforeUnmount(() => offRefresh())
 </script>
 
 <template>

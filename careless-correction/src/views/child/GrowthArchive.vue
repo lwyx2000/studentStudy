@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onPageRefresh } from '../../utils/refreshBus'
 import { api } from '../../utils/api'
 import { useUserStore } from '../../stores'
 
@@ -97,10 +98,18 @@ function switchTab(tab: 'checkins' | 'sunlight' | 'apples') {
   else if (tab === 'apples') loadAppleHistory()
 }
 
+function refreshCurrentTab() {
+  if (activeTab.value === 'checkins') loadCheckins()
+  else if (activeTab.value === 'sunlight') loadSunHistory()
+  else if (activeTab.value === 'apples') loadAppleHistory()
+}
+const offRefresh = onPageRefresh(refreshCurrentTab)
+
 onMounted(async () => {
   await userStore.fetchFromApi()
   await loadCheckins()
 })
+onBeforeUnmount(() => offRefresh())
 
 function formatDate(iso: string): string {
   const d = new Date(iso)
