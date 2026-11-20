@@ -9,6 +9,8 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // 注册应用内更新插件（必须在 super.onCreate 之前，桥接才会加载它）
+        registerPlugin(AppUpdaterPlugin.class);
         super.onCreate(savedInstanceState);
         // 全屏沉浸式，隐藏状态栏和导航栏
         getWindow().setFlags(

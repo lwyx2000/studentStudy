@@ -1,0 +1,8 @@
+{
+  "versionCode": 2,
+  "versionName": "1.1",
+  "changelog": "1. 新增应用内自动更新，可在 App 内直接下载安装新版本\n2. 修复已知问题，优化使用体验",
+  "downloadUrl": "/downloads/app-debug.apk",
+  "force": false,
+  "publishedAt": "2026-11-20"
+}

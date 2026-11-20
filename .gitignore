@@ -31,3 +31,6 @@ careless-correction/android/app/release/
 *.apk
 *.aab
 *.keystore
+
+# 例外：应用内更新分发的 APK 需要随代码部署到服务器 downloads/
+!downloads/*.apk
